@@ -1,0 +1,24 @@
+.bunsho-panel { padding: 12px 14px; }
+.bunsho-panel h4 { margin: 0 0 6px; }
+.bunsho-box { border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 12px; margin-bottom: 12px; background: var(--background-secondary); }
+.bunsho-box p { margin: 0 0 8px; }
+.bunsho-box pre { font-size: var(--font-smaller); padding: 8px; background: var(--background-primary); border-radius: 6px; margin: 0 0 8px; }
+.bunsho-box ul { margin: 0 0 10px; padding-left: 18px; color: var(--text-muted); }
+.bunsho-summary { margin-bottom: 10px; }
+.bunsho-muted { color: var(--text-muted); font-size: var(--font-smaller); }
+.bunsho-problem, .bunsho-error { color: var(--text-error); }
+.bunsho-bar { height: 6px; border-radius: 3px; background: var(--background-modifier-border); overflow: hidden; margin-bottom: 8px; }
+.bunsho-bar-fill { height: 100%; background: var(--interactive-accent); transition: width 0.4s ease; }
+.bunsho-findings-head { margin: 16px 0 8px; }
+.bunsho-card { display: flex; gap: 10px; border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+.bunsho-card.is-dismissed { opacity: 0.55; }
+.bunsho-severity { width: 4px; border-radius: 2px; flex: none; background: var(--text-muted); }
+.bunsho-severity.is-error { background: var(--text-error); }
+.bunsho-severity.is-warning { background: var(--text-warning); }
+.bunsho-card-body { min-width: 0; flex: 1; }
+.bunsho-message { margin: 0 0 8px; font-weight: 500; }
+.bunsho-quote { margin-bottom: 8px; }
+.bunsho-quote-label { font-size: var(--font-smaller); color: var(--text-muted); }
+.bunsho-quote blockquote { margin: 2px 0 2px; padding: 2px 0 2px 8px; border-left: 2px solid var(--background-modifier-border); font-style: italic; }
+button.bunsho-link { background: none; border: none; box-shadow: none; padding: 0; margin-right: 12px; color: var(--text-accent); cursor: pointer; height: auto; font-size: var(--font-smaller); }
+button.bunsho-link:hover { text-decoration: underline; }
