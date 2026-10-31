@@ -26,7 +26,7 @@ export class BunshoView extends ItemView {
     if (!account.signedIn) {
       const box = root.createDiv({ cls: "bunsho-box" });
       box.createEl("h4", { text: "Check your story for contradictions" });
-      box.createEl("p", { text: "Sign in with the Google account you use for Bunsho. Your chapters are only sent when you press Check manuscript." });
+      box.createEl("p", { text: "Sign in with the Google account you use for Bunsho. Your chapters are only sent when you start a check." });
       if (account.problem) box.createEl("p", { text: account.problem, cls: "bunsho-problem" });
       box.createEl("button", { text: "Sign in with Google", cls: "mod-cta" }).onclick = () => void this.plugin.signIn();
     }

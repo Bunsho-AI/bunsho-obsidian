@@ -71,8 +71,7 @@ export function waitForAuthorizationCode(state: string, timeoutMs = SIGN_IN_TIME
     const code = new Promise<string>((resolve, reject) => { settle = { resolve, reject }; });
     code.catch(() => undefined);
     const stop = () => { server.close(); for (const socket of sockets) socket.destroy(); };
-    const timer = setTimeout(() => { stop(); settle.reject(new AuthError("cancelled", "Sign-in timed out.")); }, timeoutMs);
-    timer.unref?.();
+    const timer = window.setTimeout(() => { stop(); settle.reject(new AuthError("cancelled", "Sign-in timed out.")); }, timeoutMs);
     server.on("connection", (socket) => { sockets.add(socket); socket.on("close", () => sockets.delete(socket)); });
     server.on("request", (req, res) => {
       const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -83,7 +82,7 @@ export function waitForAuthorizationCode(state: string, timeoutMs = SIGN_IN_TIME
       const code = url.searchParams.get("code");
       const finish = (page: string, done: () => void) => {
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", Connection: "close" });
-        res.end(page, () => { clearTimeout(timer); stop(); done(); });
+        res.end(page, () => { window.clearTimeout(timer); stop(); done(); });
       };
       if (!code) {
         finish(PAGE("Sign-in didn't complete.", "Return to Obsidian and try again."),

@@ -5,7 +5,7 @@ Find continuity errors in your novel: a character's eye colour that changes, a t
 ## What you need
 
 - A [Bunsho](https://bunsho.io) account (sign in with Google). Checks use your Bunsho credits, the same balance as the desktop app. New accounts start with a free allowance.
-- Obsidian on desktop (macOS, Windows or Linux). The plugin is desktop-only.
+- Obsidian 1.11.4 or later on desktop (macOS, Windows or Linux). The plugin is desktop-only.
 
 ## Your manuscript layout
 
@@ -38,18 +38,21 @@ Checking only ever runs when you press the button. Writing is never metered.
 - **Payment.** A check is paid for with Bunsho credits. Credits are bought at bunsho.io, not inside the plugin.
 - **Network use.** When you confirm a check, the plugin sends the text of your chapter notes to the Bunsho service (`engine.bunsho.io`) over an encrypted connection to be checked, and receives the findings. While you are signed in it also reads your credit balance and the current price from the Bunsho service (when Obsidian starts, when the panel opens and after a check), and it contacts Google and Firebase to sign you in and keep you signed in. Requests carry a random install id generated on this machine and the plugin version; the install id protects the free starter allowance from abuse. Your notes are not sent at any other time.
 - **Telemetry.** The plugin sends no analytics or telemetry. The Bunsho service keeps the account and billing records needed to charge credits; see the privacy policy at https://bunsho.io/privacy.
-- **Stored on your machine.** Findings and dismissals live in the plugin's `data.json`. Your sign-in is kept in Obsidian's secret storage (or in `data.json` on Obsidian versions without it).
+- **Stored on your machine.** Findings and dismissals live in the plugin's `data.json`. Your sign-in is kept in Obsidian's secret storage, never in `data.json`.
 - **Open source.** The plugin is a thin client under the MIT license. Detection runs in the Bunsho service.
 
 ## Development
 
 ```
 npm install
+npm run lint        # Obsidian's official plugin guidelines linter (eslint-plugin-obsidianmd)
 npm test            # unit tests and an integration test against a mock engine
 npm run build       # typecheck + bundle main.js
 node scripts/mock-engine.mjs 8799   # a stand-in engine, no model credits
 ```
 
 Local sign-in settings are read at build time from `BUNSHO_FIREBASE_API_KEY`, `BUNSHO_GOOGLE_CLIENT_ID`, `BUNSHO_GOOGLE_CLIENT_SECRET` and `BUNSHO_ENGINE_URL` (see `src/authConfig.ts`).
+
+Releasing: bump `version` in `manifest.json` and `package.json`, add it to `versions.json`, then push a tag equal to the version (no leading `v`). The release workflow lints, tests, builds from source and attaches `main.js`, `manifest.json` and `styles.css` to a draft GitHub release.
 
 `src/vendor/` holds modules copied from the Bunsho desktop app (the review wire contract, pricing, and citation grounding). They are one contract with the engine; change them together.

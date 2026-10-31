@@ -1,5 +1,5 @@
 /**
- * Pipeline v3 engine client: GET /v1/pipeline/v3/health over the EngineClient's HTTP request path,
+ * Pipeline v3 engine client (plugin copy: timers are window timers, as Obsidian's guidelines require for pop-out windows): GET /v1/pipeline/v3/health over the EngineClient's HTTP request path,
  * and one review per WebSocket on /v1/pipeline/v3/review (contract: pipelineV3.types.ts).
  *
  * A review is one connection: `start`, then each page whole and each selected passage set, then the
@@ -171,6 +171,12 @@ export function assertReviewRequest(request: PipelineV3ReviewRequest): void {
     || request.passages.some((entry) => frame("passages", entry) > PIPELINE_V3_LIMITS.maxFrameBytes)) throw contextTooLarge();
 }
 
+/** A text frame's payload as a string (ws hands over a Buffer, an ArrayBuffer or Buffer fragments). */
+function textOf(data: RawData): string {
+  if (Array.isArray(data)) return Buffer.concat(data).toString("utf8");
+  return (Buffer.isBuffer(data) ? data : Buffer.from(data)).toString("utf8");
+}
+
 function admissionError(status: number): PipelineV3Error {
   if (status === 401 || status === 403) return new PipelineV3Error("unauthorized", { status });
   if (status === 402) return new PipelineV3Error("insufficient_credits", { status });
@@ -260,22 +266,20 @@ export class PipelineV3Client {
       let settled = false;
       let resultSeen = false;
       let cancelling = false;
-      let timer: ReturnType<typeof setTimeout> | undefined;
+      let timer: number | undefined;
       let reads: Promise<void> = Promise.resolve();
 
       const finish = (error: PipelineV3Error | null, result?: PipelineV3Result) => {
         if (settled) return;
         settled = true;
-        if (timer) clearTimeout(timer);
+        if (timer) window.clearTimeout(timer);
         signal?.removeEventListener("abort", onAbort);
         socket.removeAllListeners();
         socket.on("error", () => undefined);
         if (socket.readyState === WebSocket.OPEN) {
           socket.close(1000);
-          const force = setTimeout(() => socket.terminate(), 1000);
-          // Obsidian runs this in a renderer, where timers are DOM numbers without unref (plugin-side change).
-          (force as { unref?: () => void }).unref?.();
-          socket.once("close", () => clearTimeout(force));
+          const force = window.setTimeout(() => socket.terminate(), 1000);
+          socket.once("close", () => window.clearTimeout(force));
         } else {
           socket.terminate();
         }
@@ -287,9 +291,8 @@ export class PipelineV3Client {
         }
       };
       const touch = () => {
-        if (timer) clearTimeout(timer);
-        timer = setTimeout(() => finish(new PipelineV3Error("timed_out")), idleMs);
-        timer.unref?.();
+        if (timer) window.clearTimeout(timer);
+        timer = window.setTimeout(() => finish(new PipelineV3Error("timed_out")), idleMs);
       };
       const send = (type: PipelineV3ClientFrameType, payload?: unknown) => {
         socket.send(JSON.stringify({ protocol: PIPELINE_V3_PROTOCOL, type, ...(payload === undefined ? {} : { payload }) }), (error) => {
@@ -311,9 +314,8 @@ export class PipelineV3Client {
         if (socket.readyState !== WebSocket.OPEN) return finish(new PipelineV3Error("cancelled"));
         cancelling = true;
         try { send("cancel"); } catch { return finish(new PipelineV3Error("cancelled")); }
-        if (timer) clearTimeout(timer);
-        timer = setTimeout(() => finish(new PipelineV3Error("cancelled")), cancelSettleMs);
-        timer.unref?.();
+        if (timer) window.clearTimeout(timer);
+        timer = window.setTimeout(() => finish(new PipelineV3Error("cancelled")), cancelSettleMs);
       }
       signal?.addEventListener("abort", onAbort, { once: true });
       touch();
@@ -328,7 +330,7 @@ export class PipelineV3Client {
       socket.on("message", (data: RawData, isBinary: boolean) => {
         if (settled || resultSeen) return;
         if (!cancelling) touch();
-        const frame = isBinary ? null : parseServerFrame(data.toString());
+        const frame = isBinary ? null : parseServerFrame(textOf(data));
         if (!frame) return finish(new PipelineV3Error("protocol_error"));
         switch (frame.type) {
           case "heartbeat": return;
@@ -359,7 +361,7 @@ export class PipelineV3Client {
             const result = frame.payload;
             if (result.reviewId !== start.reviewId || result.policyId !== start.policyId) return finish(new PipelineV3Error("protocol_error"));
             resultSeen = true;
-            if (timer) clearTimeout(timer);
+            if (timer) window.clearTimeout(timer);
             if (result.malformedIssues) logger.warn("Pipeline v3 malformed issues dropped", { reviewId: start.reviewId, count: result.malformedIssues });
             void reads.then(() => finish(null, result));
             return;

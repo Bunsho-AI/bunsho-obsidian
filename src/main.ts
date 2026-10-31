@@ -1,4 +1,4 @@
-import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, MarkdownView, type WorkspaceLeaf } from "obsidian";
+import { type App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, MarkdownView, type WorkspaceLeaf } from "obsidian";
 import { AUTH_CONFIG } from "./authConfig";
 import { AuthError, TokenSource, type SessionStore } from "./auth";
 import { formPost, makeTransport, readBalance } from "./connection";
@@ -23,8 +23,6 @@ interface PluginData {
   workspaceId: string;
   dismissed: string[];
   lastReview: ReviewOutcome | null;
-  /** Fallback only when this Obsidian has no secret storage (older than 1.11.4). */
-  refreshToken?: string;
 }
 
 const SECRET_ID = "bunsho-refresh-token";
@@ -54,7 +52,7 @@ export default class BunshoPlugin extends Plugin {
   account: Account = { signedIn: false, balance: null, health: null, problem: null };
   private tokens!: TokenSource;
   private abort: AbortController | null = null;
-  private scanTimer: ReturnType<typeof setTimeout> | undefined;
+  private scanTimer: number | undefined;
   private scanSeq = 0;
   private accountSeq = 0;
 
@@ -66,7 +64,7 @@ export default class BunshoPlugin extends Plugin {
     };
     // A vault's data.json can be synced or copied from elsewhere: never send a token to an address that is not ours to trust.
     if (!acceptableEngineUrl(this.data.engineUrl)) this.data.engineUrl = AUTH_CONFIG.engineUrl;
-    this.tokens = new TokenSource(formPost, await this.sessionStore());
+    this.tokens = new TokenSource(formPost, this.sessionStore());
     await this.save();
 
     this.registerView(VIEW_TYPE, (leaf: WorkspaceLeaf) => new BunshoView(leaf, this));
@@ -91,30 +89,19 @@ export default class BunshoPlugin extends Plugin {
   }
 
   onunload(): void {
-    clearTimeout(this.scanTimer);
+    window.clearTimeout(this.scanTimer);
     this.abort?.abort();
   }
 
   async save(): Promise<void> { await this.saveData(this.data); }
 
-  private async sessionStore(): Promise<SessionStore> {
-    const secrets = (this.app as App & { secretStorage?: { getSecret(id: string): string | null; setSecret(id: string, value: string): void } }).secretStorage;
-    if (secrets) {
-      // Move a token left in data.json by an older Obsidian into secret storage, and out of the (possibly synced) file.
-      if (this.data.refreshToken) {
-        if (!secrets.getSecret(SECRET_ID)) secrets.setSecret(SECRET_ID, this.data.refreshToken);
-        delete this.data.refreshToken;
-      }
-      return {
-        get: async () => secrets.getSecret(SECRET_ID) || null,
-        set: async (value) => { secrets.setSecret(SECRET_ID, value); },
-        clear: async () => { secrets.setSecret(SECRET_ID, ""); if (this.data.refreshToken) { delete this.data.refreshToken; await this.save(); } },
-      };
-    }
+  /** The sign-in lives in Obsidian's secret storage, never in data.json (which may be synced with the vault). */
+  private sessionStore(): SessionStore {
+    const secrets = this.app.secretStorage;
     return {
-      get: async () => this.data.refreshToken ?? null,
-      set: async (value) => { this.data.refreshToken = value; await this.save(); },
-      clear: async () => { delete this.data.refreshToken; await this.save(); },
+      get: () => Promise.resolve(secrets.getSecret(SECRET_ID) || null),
+      set: (value) => { secrets.setSecret(SECRET_ID, value); return Promise.resolve(); },
+      clear: () => { secrets.setSecret(SECRET_ID, ""); return Promise.resolve(); },
     };
   }
 
@@ -145,12 +132,12 @@ export default class BunshoPlugin extends Plugin {
   }
 
   scheduleScan(): void {
-    clearTimeout(this.scanTimer);
-    this.scanTimer = setTimeout(() => void this.refreshScan(), SCAN_DEBOUNCE_MS);
+    window.clearTimeout(this.scanTimer);
+    this.scanTimer = window.setTimeout(() => void this.refreshScan(), SCAN_DEBOUNCE_MS);
   }
 
   async refreshScan(): Promise<void> {
-    clearTimeout(this.scanTimer);
+    window.clearTimeout(this.scanTimer);
     const seq = ++this.scanSeq;
     let next: Scan;
     if (!this.app.vault.getFolderByPath(this.folder)) next = { status: "no_folder" };
@@ -353,8 +340,8 @@ class BunshoSettingTab extends PluginSettingTab {
         await this.plugin.save();
         this.plugin.scheduleScan();
       }));
-    new Setting(containerEl).setName("Privacy").setDesc("Your chapter notes are sent to the Bunsho service, over an encrypted connection, only when you confirm a check. While the panel is open the plugin also reads your credit balance and the current price. The plugin sends no analytics.");
-    new Setting(containerEl).setName("Engine address").setDesc("Leave this alone unless Bunsho support asks you to change it. Must start with https://.")
+    new Setting(containerEl).setName("Privacy").setDesc("Your chapter notes are sent to the Bunsho service, over an encrypted connection, only when you confirm a check. While you are signed in, the plugin also reads your credit balance and the current price. The plugin sends no analytics.");
+    new Setting(containerEl).setName("Engine address").setDesc("Leave this alone unless Bunsho support asks you to change it. It must be a secure (HTTPS) address.")
       .addText((t) => t.setValue(this.plugin.data.engineUrl).onChange(async (value) => {
         const next = value.trim() || AUTH_CONFIG.engineUrl;
         if (!acceptableEngineUrl(next)) return; // keep the last good address until the text is a valid one
@@ -362,7 +349,7 @@ class BunshoSettingTab extends PluginSettingTab {
         await this.plugin.save();
       }));
     if (isLocalEngine(this.plugin.data.engineUrl)) {
-      new Setting(containerEl).setName("Developer user id").setDesc("Local engine with AUTH_OPTIONAL only.")
+      new Setting(containerEl).setName("Developer user ID").setDesc("For a local development engine only.")
         .addText((t) => t.setValue(this.plugin.data.devUid).onChange(async (value) => { this.plugin.data.devUid = value.trim(); await this.plugin.save(); }));
     }
   }
