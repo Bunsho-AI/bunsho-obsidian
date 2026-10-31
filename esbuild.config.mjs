@@ -11,6 +11,7 @@ const context = await esbuild.context({
   format: "cjs",
   target: "es2022",
   outfile: "main.js",
+  loader: { ".png": "dataurl" }, // a plugin ships only main.js, manifest.json and styles.css, so images travel inside main.js
   // ws loads these optionally inside try/catch; Obsidian provides obsidian, electron and Node itself.
   external: ["obsidian", "electron", "bufferutil", "utf-8-validate", ...builtinModules, ...builtinModules.map((m) => `node:${m}`)],
   // Local-development overrides (see src/authConfig.ts). Unset variables become "" and the committed defaults apply.

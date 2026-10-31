@@ -1,6 +1,7 @@
 /**
- * The Bunsho mark: a lowercase b with the four-point sparkle, drawn on a 100x100 grid. The ribbon and tab icon is
- * single-colour (Obsidian tints icons with currentColor); inside the panel the sparkle is filled with brand amber.
+ * The ribbon and tab icon: the wordmark's b with its four-point sparkle, drawn on a 100x100 grid. Obsidian icons are
+ * single-colour (tinted with currentColor), so the full wordmark cannot be one; inside the panel the real wordmark
+ * images are used (atoms/BunshoWordmark).
  */
 export const BUNSHO_ICON_ID = "bunsho-mark";
 
@@ -11,6 +12,3 @@ const SPARKLE = "M80 31 C81.5 43 85 46.5 97 48 C85 49.5 81.5 53 80 65 C78.5 53 7
 /** Inner SVG for Obsidian's addIcon (viewBox 0 0 100 100), all in currentColor. */
 export const BUNSHO_ICON_SVG = `<g fill="currentColor">${B_STEM}${B_BOWL}<path d="${SPARKLE}"/></g>`;
 
-/** The full mark for the panel: the b in the text colour, the sparkle in brand amber. */
-export const BUNSHO_MARK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" aria-hidden="true">`
-  + `<g class="bunsho-mark-b" fill="currentColor">${B_STEM}${B_BOWL}</g><path class="bunsho-mark-sparkle" d="${SPARKLE}"/></svg>`;

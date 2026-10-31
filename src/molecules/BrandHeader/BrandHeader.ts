@@ -1,9 +1,8 @@
-import { BunshoMark } from "@/atoms/BunshoMark";
+import { BunshoWordmark } from "@/atoms/BunshoWordmark";
 
-/** The panel's top line: the Bunsho mark and name. */
+/** The panel's top line: the Bunsho wordmark. */
 export function BrandHeader(parent: HTMLElement): HTMLElement {
   const header = parent.createDiv({ cls: "bunsho-brand" });
-  BunshoMark(header, 16);
-  header.createSpan({ cls: "bunsho-brand-name", text: "Bunsho" });
+  BunshoWordmark(header, 16);
   return header;
 }

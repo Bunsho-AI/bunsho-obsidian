@@ -109,11 +109,11 @@ button.bunsho-quiet { font-size: var(--font-ui-small); }
 
 .bunsho-footer { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
 
-/* Brand: the Bunsho mark (b in text colour, sparkle in brand amber) */
-.bunsho-mark { display: inline-flex; width: var(--bunsho-mark-size, 16px); height: var(--bunsho-mark-size, 16px); color: var(--text-normal); flex: none; }
-.bunsho-mark svg { width: 100%; height: 100%; }
-.bunsho-mark-sparkle { fill: var(--bunsho-accent); }
-.bunsho-brand { display: flex; align-items: center; gap: 7px; padding: 10px 12px 0; }
-.bunsho-brand-name { font-family: var(--bunsho-font-quote); font-size: 14px; color: var(--text-normal); }
-.bunsho-signin .bunsho-mark { margin-bottom: 14px; }
+/* Brand: the "bunsho✦" wordmark, cropped to its ink. Dark letters on light themes, the white mark on dark themes. */
+.bunsho-wordmark { display: inline-flex; height: var(--bunsho-wordmark-height, 16px); flex: none; }
+.bunsho-wordmark img { height: 100%; width: auto; max-width: none; user-select: none; }
+.bunsho-wordmark-dark, .theme-dark .bunsho-wordmark-light { display: none; }
+.theme-dark .bunsho-wordmark-dark { display: block; }
+.bunsho-brand { display: flex; align-items: center; padding: 10px 12px 0; }
+.bunsho-signin .bunsho-wordmark { margin-bottom: 16px; }
 .bunsho-muted { color: var(--text-muted); font-size: var(--font-ui-small); }
