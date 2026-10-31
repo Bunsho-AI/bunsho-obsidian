@@ -28,13 +28,14 @@
 
 /* Status row: one line of fact, one priced action */
 .bunsho-status {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  height: 34px; padding: 0 12px; border-bottom: 1px solid var(--background-modifier-border);
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; column-gap: 8px; row-gap: 2px;
+  min-height: 34px; padding: 6px 12px; box-sizing: border-box; border-bottom: 1px solid var(--background-modifier-border);
 }
-.bunsho-status-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* In a narrow sidebar the action wraps under the fact instead of cutting it off. */
+.bunsho-status-text { flex: 0 1 auto; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bunsho-status-text.is-reading { animation: bunsho-reading 1.4s ease-in-out infinite; }
 @keyframes bunsho-reading { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
-.bunsho-status-action { flex: none; }
+.bunsho-status-action { flex: none; margin-left: auto; }
 
 .bunsho-body { padding: 12px; }
 

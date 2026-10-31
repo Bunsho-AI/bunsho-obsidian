@@ -82,6 +82,7 @@ export class BunshoView extends ItemView {
     fact.setText(parts.join(" · "));
 
     if (account.project === "blocked") return; // the alert card explains; no priced action on a project the plan does not cover
+    if (!review) return; // before the first check the action is the empty state's button: one priced action, never two
     const price = this.plugin.price();
     this.link(action, price === null ? "Check manuscript" : `Check manuscript · ~${fmt(price)} credits`, () => void this.plugin.check());
   }
@@ -136,6 +137,9 @@ export class BunshoView extends ItemView {
       const box = body.createDiv({ cls: "bunsho-empty" });
       box.createDiv({ cls: "bunsho-empty-title", text: "Nothing has been checked yet" });
       box.createEl("p", { cls: "bunsho-empty-body", text: "Bunsho reads every chapter and shows where your story contradicts itself, quoting both passages. You see the price before anything is spent." });
+      const price = this.plugin.price();
+      const button = box.createEl("button", { cls: "bunsho-fill", text: price === null ? "Check manuscript" : `Check manuscript \u00b7 ~${fmt(price)} credits` });
+      button.onclick = () => void this.plugin.check();
       return;
     }
     const dismissed = new Set(this.plugin.data.dismissed);
