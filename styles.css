@@ -49,7 +49,7 @@ button.bunsho-text-action.is-quiet { color: var(--text-muted); text-decoration: 
 button.bunsho-text-action:hover { text-decoration: underline; }
 button.bunsho-text-action:focus-visible, .bunsho-passage:focus-visible { outline: 2px solid var(--bunsho-accent); outline-offset: 2px; border-radius: 2px; }
 
-/* The one filled button (sign in): gold is a fill */
+/* The filled button (the priced check): gold is a fill */
 button.bunsho-fill {
   background: var(--bunsho-accent); color: var(--bunsho-on-accent); border: none; box-shadow: none;
   font-weight: 600; padding: 6px 14px; border-radius: 4px; cursor: pointer;
@@ -115,5 +115,19 @@ button.bunsho-quiet { font-size: var(--font-ui-small); }
 .bunsho-wordmark-dark, .theme-dark .bunsho-wordmark-light { display: none; }
 .theme-dark .bunsho-wordmark-dark { display: block; }
 .bunsho-brand { display: flex; align-items: center; padding: 10px 12px 0; }
+.bunsho-signin { display: flex; flex-direction: column; align-items: center; text-align: center; }
 .bunsho-signin .bunsho-wordmark { margin-bottom: 16px; }
+.bunsho-signin .bunsho-empty-body { max-width: 300px; }
+
+/* Google's sign-in button, per Google's branding guidelines: light style on light themes, dark style on dark themes. */
+button.bunsho-google {
+  display: inline-flex; align-items: center; gap: 10px; height: 40px; padding: 0 12px; border-radius: 4px; cursor: pointer;
+  background: #ffffff; color: #1f1f1f; border: 1px solid #747775; box-shadow: none;
+  font-family: var(--font-interface); font-size: 14px; font-weight: 500;
+}
+button.bunsho-google:hover { background: #f8f9fa; box-shadow: 0 1px 2px rgba(60, 64, 67, 0.3); }
+.theme-dark button.bunsho-google { background: #131314; color: #e3e3e3; border-color: #8e918f; }
+.theme-dark button.bunsho-google:hover { background: #1f1f20; }
+.bunsho-google-logo { display: inline-flex; width: 20px; height: 20px; }
+.bunsho-google-logo svg { width: 100%; height: 100%; }
 .bunsho-muted { color: var(--text-muted); font-size: var(--font-ui-small); }

@@ -1,5 +1,5 @@
 import { BunshoWordmark } from "@/atoms/BunshoWordmark";
-import { FillButton } from "@/atoms/FillButton";
+import { GoogleSignInButton } from "@/atoms/GoogleSignInButton";
 
 /** Signed out, this is the whole panel: nothing in the plugin works without a Bunsho sign-in. */
 export interface SignInPanelProps { problem: string | null; onSignIn: () => void }
@@ -10,6 +10,6 @@ export function SignInPanel(parent: HTMLElement, { problem, onSignIn }: SignInPa
   box.createDiv({ cls: "bunsho-empty-title", text: "Check your story for contradictions" });
   box.createEl("p", { cls: "bunsho-empty-body", text: "Sign in with the Google account you use for Bunsho. Your chapters are only sent when you start a check." });
   if (problem) box.createEl("p", { cls: "bunsho-problem", text: problem });
-  FillButton(box, { label: "Sign in with Google", onClick: onSignIn });
+  GoogleSignInButton(box, { onClick: onSignIn });
   return box;
 }

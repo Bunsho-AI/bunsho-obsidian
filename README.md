@@ -74,14 +74,14 @@ src/
   pages/             what Obsidian mounts: ContinuityView (panel), SettingsTab, ConfirmCheckModal
   organisms/         SignInPanel, ManuscriptHelp, FindingCard, FindingsList
   molecules/         BrandHeader, StatusRow, GroupHeader, Passage, AlertCard, EmptyState
-  atoms/             TextAction, FillButton, QuietButton, Fact, SeverityLabel, BunshoWordmark
+  atoms/             TextAction, FillButton, QuietButton, Fact, SeverityLabel, BunshoWordmark, GoogleSignInButton
   controllers/       ContinuityController: state and actions (the "hooks" layer for a non-React app)
   types/             shared state and persisted-data types
   lib/obsidian/      Obsidian API glue: vault reading, secret storage, selecting a passage
   lib/services/      engine access: auth (Google sign-in), engine (HTTP), review (WebSocket), project (free plan)
   helpers/           Bunsho domain logic, pure: chapters, quote location, progress, one-project state
   lib/contract/      the engine wire contract, copied from the desktop app (change with the engine)
-  assets/            the wordmark images (inlined into main.js) and the ribbon icon (SVG)
+  assets/            the wordmark images (inlined into main.js), the ribbon icon and Google's G (SVG)
   utils/             generic pure functions: markdown projection, hashing, formatting, URLs
 ```
 
