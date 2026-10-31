@@ -66,8 +66,8 @@ export class BunshoView extends ItemView {
   private renderCheck(root: HTMLElement): void {
     const { phase, account } = this.plugin;
     const box = root.createDiv({ cls: "bunsho-box" });
-    if (phase.kind === "preparing") {
-      box.createEl("p", { text: "Reading your chapters and the current price...", cls: "bunsho-muted" });
+    if (phase.kind === "preparing" || phase.kind === "confirming") {
+      box.createEl("p", { text: phase.kind === "preparing" ? "Reading your chapters and the current price..." : "Confirm the price to start the check.", cls: "bunsho-muted" });
       return;
     }
     if (phase.kind === "checking") {
@@ -92,7 +92,8 @@ export class BunshoView extends ItemView {
 
   private renderFindings(root: HTMLElement): void {
     const review = this.plugin.data.lastReview;
-    if (!review) return;
+    // Findings from another manuscript folder (the setting changed since) are not about this manuscript.
+    if (!review || review.chapters.some((c) => !this.plugin.inManuscript(c.pageId))) return;
     const { scan } = this.plugin;
     const dismissed = new Set(this.plugin.data.dismissed);
     const open = review.issues.filter((i) => !dismissed.has(i.issue_id));
@@ -100,7 +101,8 @@ export class BunshoView extends ItemView {
     const edited = scan.status === "ready" && scan.snapshotId !== review.snapshotId;
 
     const head = root.createDiv({ cls: "bunsho-findings-head" });
-    head.createEl("h4", { text: open.length === 0 ? "No contradictions found" : `${open.length} ${open.length === 1 ? "finding" : "findings"}` });
+    head.createEl("h4", { text: review.issues.length === 0 ? "No contradictions found"
+      : open.length === 0 ? "No open findings" : `${open.length} ${open.length === 1 ? "finding" : "findings"}` });
     head.createDiv({ cls: "bunsho-muted", text: `Checked ${new Date(review.checkedAt).toLocaleString()}${edited ? " · text edited since" : ""}` });
     if (review.unreadPages.length > 0) {
       root.createEl("p", { text: `${review.unreadPages.length} ${review.unreadPages.length === 1 ? "chapter" : "chapters"} could not be read and ${review.unreadPages.length === 1 ? "was" : "were"} not checked.`, cls: "bunsho-problem" });

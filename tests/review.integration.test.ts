@@ -61,6 +61,24 @@ describe("a review against the engine protocol", () => {
       (e) => e instanceof PipelineV3Error && e.code === "model_unavailable" && e.detail.charged === false && e.message.includes("You were not charged"));
   });
 
+  it("completes with browser-style timers (Obsidian's renderer: setTimeout returns a number, no unref)", async () => {
+    const real = globalThis.setTimeout;
+    const realClear = globalThis.clearTimeout;
+    const timers = new Map<number, ReturnType<typeof real>>();
+    let next = 1;
+    const domLike = ((fn: () => void, ms?: number) => { const id = next++; timers.set(id, real(fn, ms)); return id; }) as unknown as typeof setTimeout;
+    const { client, health } = await clientFor({ holdOpen: true });
+    globalThis.setTimeout = domLike;
+    globalThis.clearTimeout = ((id: unknown) => { const t = timers.get(id as number); if (t) realClear(t); else realClear(id as ReturnType<typeof real>); }) as typeof clearTimeout;
+    try {
+      const outcome = await runReview({ chapters, health, workspaceId: "w", client });
+      expect(outcome.issues).toHaveLength(1);
+    } finally {
+      globalThis.setTimeout = real;
+      globalThis.clearTimeout = realClear;
+    }
+  });
+
   it("cancels cleanly", async () => {
     const { client, health } = await clientFor();
     const controller = new AbortController();

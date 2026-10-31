@@ -38,6 +38,7 @@ export type Scan =
 export type Phase =
   | { kind: "idle" }
   | { kind: "preparing" }
+  | { kind: "confirming" }
   | { kind: "checking"; share: number; waiting: boolean }
   | { kind: "error"; message: string; charged?: boolean };
 
@@ -126,7 +127,7 @@ export default class BunshoPlugin extends Plugin {
 
   private get folder(): string { return this.data.manuscriptFolder.replace(/^\/+|\/+$/gu, ""); }
   private isManuscriptFolder(path: string): boolean { return path === this.folder; }
-  private inManuscript(path: string): boolean {
+  inManuscript(path: string): boolean {
     return path.endsWith(".md") && path.startsWith(`${this.folder}/`) && !path.slice(this.folder.length + 1).includes("/");
   }
 
@@ -216,7 +217,7 @@ export default class BunshoPlugin extends Plugin {
    * spent (from the panel and from the command palette alike), and runs at most one review at a time.
    */
   async check(): Promise<void> {
-    if (this.phase.kind === "preparing" || this.phase.kind === "checking") return;
+    if (this.phase.kind !== "idle" && this.phase.kind !== "error") return;
     this.phase = { kind: "preparing" };
     this.changed();
     try {
@@ -234,6 +235,8 @@ export default class BunshoPlugin extends Plugin {
       if (credits !== null && account.balance !== null && account.balance < credits) {
         return this.fail(`This check costs about ${credits.toLocaleString("en-US")} credits and you have ${account.balance.toLocaleString("en-US")}. Add credits in Bunsho, then try again.`);
       }
+      this.phase = { kind: "confirming" };
+      this.changed();
       const confirmed = await confirmCheck(this.app, scan.chapters.length, scan.words, credits, account.balance);
       if (!confirmed) return this.idle();
       await this.runConfirmed(scan.chapters, account.health, credits);

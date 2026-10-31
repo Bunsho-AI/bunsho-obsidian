@@ -273,7 +273,8 @@ export class PipelineV3Client {
         if (socket.readyState === WebSocket.OPEN) {
           socket.close(1000);
           const force = setTimeout(() => socket.terminate(), 1000);
-          force.unref();
+          // Obsidian runs this in a renderer, where timers are DOM numbers without unref (plugin-side change).
+          (force as { unref?: () => void }).unref?.();
           socket.once("close", () => clearTimeout(force));
         } else {
           socket.terminate();

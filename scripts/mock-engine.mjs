@@ -41,7 +41,7 @@ export function findings(start, pages) {
   return issues;
 }
 
-export function startMockEngine({ port = 0, balance = 500, tamper = false, failWith = null } = {}) {
+export function startMockEngine({ port = 0, balance = 500, tamper = false, failWith = null, holdOpen = false } = {}) {
   const requests = [];
   const server = http.createServer((req, res) => {
     requests.push({ url: req.url, headers: req.headers });
@@ -74,7 +74,8 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
         if (tamper) for (const issue of issues) issue.citations[tamper === "prior" ? 0 : 1].source_ref.end += 1; // cites text that was never sent
         socket.send(frame("result", { reviewId: start.reviewId, policyId: start.policyId, readPolicyId: start.readPolicyId, issues, cast: [],
           stats: { chapters: start.pages.length } }));
-        socket.close(1000);
+        if (!holdOpen) socket.close(1000); // holdOpen: leave closing to the client, as the real engine's timing can
+
       }, 250);
     });
   });
