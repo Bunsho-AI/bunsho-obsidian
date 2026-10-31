@@ -1,12 +1,13 @@
-import { App, Notice, Plugin, PluginSettingTab, Setting, TFile, MarkdownView, type WorkspaceLeaf } from "obsidian";
+import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, MarkdownView, type WorkspaceLeaf } from "obsidian";
 import { AUTH_CONFIG } from "./authConfig";
 import { AuthError, TokenSource, type SessionStore } from "./auth";
 import { formPost, makeTransport, readBalance } from "./connection";
+import { acceptableEngineUrl, isLocalEngine } from "./engineUrl";
 import { locateQuote } from "./locate";
 import { projectMarkdown } from "./projection";
 import { ProgressTracker } from "./progress";
 import { runReview, type ReviewOutcome } from "./review";
-import { buildChapters, DEFAULT_MANUSCRIPT_FOLDER, roughWords, sha256, type Chapter, type SkippedNote } from "./structure";
+import { buildChapters, chapterProblems, DEFAULT_MANUSCRIPT_FOLDER, roughWords, sha256, snapshotId, type Chapter, type SkippedNote } from "./structure";
 import { PipelineV3Client, PipelineV3Error } from "./vendor/pipelineV3Client";
 import { PIPELINE_V3_PRICE_OP, type PipelineV3Health } from "./vendor/pipelineV3.types";
 import { pipelineV3ReviewCredits } from "./vendor/pipelineV3Pricing";
@@ -27,15 +28,23 @@ interface PluginData {
 }
 
 const SECRET_ID = "bunsho-refresh-token";
+const SCAN_DEBOUNCE_MS = 1500;
 
 export type Scan =
   | { status: "no_folder" }
   | { status: "no_notes" }
-  | { status: "ready"; chapters: Chapter[]; skipped: SkippedNote[]; chars: number; words: number };
+  | { status: "ready"; chapters: Chapter[]; skipped: SkippedNote[]; chars: number; words: number; snapshotId: string };
 
-export type Phase = { kind: "idle" } | { kind: "checking"; share: number; waiting: boolean } | { kind: "error"; message: string; charged?: boolean };
+export type Phase =
+  | { kind: "idle" }
+  | { kind: "preparing" }
+  | { kind: "checking"; share: number; waiting: boolean }
+  | { kind: "error"; message: string; charged?: boolean };
 
 export interface Account { signedIn: boolean; balance: number | null; health: PipelineV3Health | null; problem: string | null }
+
+/** Obsidian's editor holds LF text; files written elsewhere may have CRLF. One line-ending everywhere keeps offsets aligned. */
+const lf = (text: string): string => text.replace(/\r\n?/gu, "\n");
 
 export default class BunshoPlugin extends Plugin {
   data!: PluginData;
@@ -44,6 +53,9 @@ export default class BunshoPlugin extends Plugin {
   account: Account = { signedIn: false, balance: null, health: null, problem: null };
   private tokens!: TokenSource;
   private abort: AbortController | null = null;
+  private scanTimer: ReturnType<typeof setTimeout> | undefined;
+  private scanSeq = 0;
+  private accountSeq = 0;
 
   async onload(): Promise<void> {
     const saved = (await this.loadData()) as Partial<PluginData> | null;
@@ -51,8 +63,10 @@ export default class BunshoPlugin extends Plugin {
       manuscriptFolder: DEFAULT_MANUSCRIPT_FOLDER, engineUrl: AUTH_CONFIG.engineUrl, devUid: "",
       installId: crypto.randomUUID(), workspaceId: crypto.randomUUID(), dismissed: [], lastReview: null, ...saved,
     };
+    // A vault's data.json can be synced or copied from elsewhere: never send a token to an address that is not ours to trust.
+    if (!acceptableEngineUrl(this.data.engineUrl)) this.data.engineUrl = AUTH_CONFIG.engineUrl;
+    this.tokens = new TokenSource(formPost, await this.sessionStore());
     await this.save();
-    this.tokens = new TokenSource(formPost, this.sessionStore());
 
     this.registerView(VIEW_TYPE, (leaf: WorkspaceLeaf) => new BunshoView(leaf, this));
     this.addRibbonIcon("book-open-check", "Bunsho: continuity", () => void this.openPanel());
@@ -62,30 +76,38 @@ export default class BunshoPlugin extends Plugin {
     this.addCommand({ id: "sign-out", name: "Sign out", callback: () => void this.signOut() });
     this.addSettingTab(new BunshoSettingTab(this.app, this));
 
-    // The vault is not indexed until the workspace is ready; scanning earlier would see no notes.
-    this.app.workspace.onLayoutReady(() => void this.refresh());
-    this.registerEvent(this.app.vault.on("create", () => void this.refreshScan()));
-    this.registerEvent(this.app.vault.on("delete", () => void this.refreshScan()));
-    this.registerEvent(this.app.vault.on("rename", () => void this.refreshScan()));
-    let pending: ReturnType<typeof setTimeout> | undefined;
-    this.registerEvent(this.app.vault.on("modify", (file) => {
-      if (!this.inManuscript(file.path)) return;
-      clearTimeout(pending); // a note autosaves every couple of seconds while the writer types
-      pending = setTimeout(() => void this.refreshScan(), 1500);
-    }));
+    // The vault is not indexed until the workspace is ready; registering earlier would scan once per file at startup.
+    this.app.workspace.onLayoutReady(() => {
+      void this.refresh();
+      const onChange = (file: { path: string }, oldPath?: string) => {
+        if (this.inManuscript(file.path) || (oldPath !== undefined && this.inManuscript(oldPath)) || this.isManuscriptFolder(file.path)) this.scheduleScan();
+      };
+      this.registerEvent(this.app.vault.on("create", (file) => onChange(file)));
+      this.registerEvent(this.app.vault.on("delete", (file) => onChange(file)));
+      this.registerEvent(this.app.vault.on("rename", (file, oldPath) => onChange(file, oldPath)));
+      this.registerEvent(this.app.vault.on("modify", (file) => onChange(file))); // a note autosaves every couple of seconds while typing
+    });
   }
 
-  onunload(): void { this.abort?.abort(); }
+  onunload(): void {
+    clearTimeout(this.scanTimer);
+    this.abort?.abort();
+  }
 
   async save(): Promise<void> { await this.saveData(this.data); }
 
-  private sessionStore(): SessionStore {
+  private async sessionStore(): Promise<SessionStore> {
     const secrets = (this.app as App & { secretStorage?: { getSecret(id: string): string | null; setSecret(id: string, value: string): void } }).secretStorage;
     if (secrets) {
+      // Move a token left in data.json by an older Obsidian into secret storage, and out of the (possibly synced) file.
+      if (this.data.refreshToken) {
+        if (!secrets.getSecret(SECRET_ID)) secrets.setSecret(SECRET_ID, this.data.refreshToken);
+        delete this.data.refreshToken;
+      }
       return {
         get: async () => secrets.getSecret(SECRET_ID) || null,
         set: async (value) => { secrets.setSecret(SECRET_ID, value); },
-        clear: async () => { secrets.setSecret(SECRET_ID, ""); },
+        clear: async () => { secrets.setSecret(SECRET_ID, ""); if (this.data.refreshToken) { delete this.data.refreshToken; await this.save(); } },
       };
     }
     return {
@@ -95,57 +117,72 @@ export default class BunshoPlugin extends Plugin {
     };
   }
 
-  private get isDev(): boolean { return /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/u.test(this.data.engineUrl); }
+  private get devUid(): string | undefined { return isLocalEngine(this.data.engineUrl) && this.data.devUid ? this.data.devUid : undefined; }
 
   private transport() {
     return makeTransport({ baseUrl: this.data.engineUrl, tokens: this.tokens, installId: this.data.installId, version: this.manifest.version,
-      devUid: this.isDev && this.data.devUid ? this.data.devUid : undefined, logger: { warn: (m, x) => console.warn(`[Bunsho] ${m}`, x), info: () => undefined } });
+      devUid: this.devUid, logger: { warn: (m, x) => console.warn(`[Bunsho] ${m}`, x), info: () => undefined } });
   }
 
+  private get folder(): string { return this.data.manuscriptFolder.replace(/^\/+|\/+$/gu, ""); }
+  private isManuscriptFolder(path: string): boolean { return path === this.folder; }
   private inManuscript(path: string): boolean {
-    const folder = this.data.manuscriptFolder.replace(/^\/+|\/+$/gu, "");
-    return path.startsWith(`${folder}/`) && !path.slice(folder.length + 1).includes("/");
+    return path.endsWith(".md") && path.startsWith(`${this.folder}/`) && !path.slice(this.folder.length + 1).includes("/");
   }
 
   /** The note as the writer sees it: the open editor's text when the note is open (it may not be saved yet), else the file. */
   private async noteText(file: TFile): Promise<string> {
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       const view = leaf.view;
-      if (view instanceof MarkdownView && view.file?.path === file.path) return view.editor.getValue();
+      if (view instanceof MarkdownView && view.file?.path === file.path) return lf(view.editor.getValue());
     }
-    return this.app.vault.read(file);
+    return lf(await this.app.vault.read(file));
   }
 
   async refresh(): Promise<void> {
     await Promise.all([this.refreshScan(), this.refreshAccount()]);
   }
 
+  scheduleScan(): void {
+    clearTimeout(this.scanTimer);
+    this.scanTimer = setTimeout(() => void this.refreshScan(), SCAN_DEBOUNCE_MS);
+  }
+
   async refreshScan(): Promise<void> {
-    const folder = this.data.manuscriptFolder.replace(/^\/+|\/+$/gu, "");
-    if (!this.app.vault.getFolderByPath(folder)) this.scan = { status: "no_folder" };
+    clearTimeout(this.scanTimer);
+    const seq = ++this.scanSeq;
+    let next: Scan;
+    if (!this.app.vault.getFolderByPath(this.folder)) next = { status: "no_folder" };
     else {
       const files = this.app.vault.getMarkdownFiles().filter((f) => this.inManuscript(f.path));
       const notes = await Promise.all(files.map(async (f) => ({ path: f.path, basename: f.basename, text: await this.noteText(f) })));
       const { chapters, skipped } = buildChapters(notes);
-      this.scan = chapters.length === 0 ? { status: "no_notes" }
-        : { status: "ready", chapters, skipped, chars: chapters.reduce((n, c) => n + c.text.length, 0), words: chapters.reduce((n, c) => n + roughWords(c.text), 0) };
+      next = chapters.length === 0 ? { status: "no_notes" } : {
+        status: "ready", chapters, skipped, snapshotId: snapshotId(chapters),
+        chars: chapters.reduce((n, c) => n + c.text.length, 0), words: chapters.reduce((n, c) => n + roughWords(c.text), 0),
+      };
     }
+    if (seq !== this.scanSeq) return; // a newer scan started while this one read notes
+    this.scan = next;
     this.changed();
   }
 
   async refreshAccount(): Promise<void> {
-    const signedIn = (await this.tokens.signedIn()) || Boolean(this.isDev && this.data.devUid);
-    this.account = { signedIn, balance: null, health: null, problem: null };
+    const seq = ++this.accountSeq;
+    const signedIn = (await this.tokens.signedIn()) || Boolean(this.devUid);
+    let next: Account = { signedIn, balance: null, health: null, problem: null };
     if (signedIn) {
       try {
-        const client = new PipelineV3Client(this.transport());
-        const [health, balance] = await Promise.all([client.health(), readBalance(this.transport())]);
-        this.account = { signedIn, health, balance, problem: null };
+        const transport = this.transport();
+        const [health, balance] = await Promise.all([new PipelineV3Client(transport).health(), readBalance(transport)]);
+        next = { signedIn, health, balance, problem: null };
       } catch (error) {
-        if (error instanceof AuthError && error.code === "signed_out") this.account = { signedIn: false, balance: null, health: null, problem: error.message };
-        else this.account = { ...this.account, problem: error instanceof PipelineV3Error ? error.message : "Could not reach Bunsho. Check your connection." };
+        next = error instanceof AuthError && error.code === "signed_out" ? { signedIn: false, balance: null, health: null, problem: error.message }
+          : { ...next, problem: error instanceof PipelineV3Error || error instanceof AuthError ? error.message : "Could not reach Bunsho. Check your connection." };
       }
     }
+    if (seq !== this.accountSeq) return; // signed out (or refreshed again) while this was in flight
+    this.account = next;
     this.changed();
   }
 
@@ -167,41 +204,70 @@ export default class BunshoPlugin extends Plugin {
   }
 
   async signOut(): Promise<void> {
+    this.accountSeq++;
     await this.tokens.signOut();
     this.data.lastReview = null;
     await this.save();
     await this.refreshAccount();
   }
 
+  /**
+   * Check the whole manuscript. Reads the notes and the engine's price fresh, shows the price and asks before anything is
+   * spent (from the panel and from the command palette alike), and runs at most one review at a time.
+   */
   async check(): Promise<void> {
-    if (this.phase.kind === "checking") return;
-    await this.refreshScan();
-    if (this.scan.status !== "ready") { new Notice("Bunsho: no chapters found. See the panel for the folder layout."); await this.openPanel(); return; }
-    if (!this.account.health) await this.refreshAccount();
-    const { health } = this.account;
-    if (!this.account.signedIn || !health) { await this.openPanel(); return; }
-    const { chapters } = this.scan;
-    const credits = this.price();
-    this.abort = new AbortController();
+    if (this.phase.kind === "preparing" || this.phase.kind === "checking") return;
+    this.phase = { kind: "preparing" };
+    this.changed();
+    try {
+      await Promise.all([this.refreshScan(), this.refreshAccount()]);
+      const { scan, account } = this;
+      if (scan.status !== "ready") { new Notice("Bunsho: no chapters found. See the panel for the folder layout."); await this.openPanel(); return this.idle(); }
+      if (!account.signedIn || !account.health) {
+        if (account.problem) new Notice(account.problem);
+        await this.openPanel();
+        return this.idle();
+      }
+      const problems = chapterProblems(scan.chapters);
+      if (problems.length > 0) return this.fail(problems[0]);
+      const credits = this.price();
+      if (credits !== null && account.balance !== null && account.balance < credits) {
+        return this.fail(`This check costs about ${credits.toLocaleString("en-US")} credits and you have ${account.balance.toLocaleString("en-US")}. Add credits in Bunsho, then try again.`);
+      }
+      const confirmed = await confirmCheck(this.app, scan.chapters.length, scan.words, credits, account.balance);
+      if (!confirmed) return this.idle();
+      await this.runConfirmed(scan.chapters, account.health, credits);
+    } catch (error) {
+      this.fail(error instanceof Error ? error.message : "The check failed.");
+    }
+  }
+
+  private async runConfirmed(chapters: Chapter[], health: PipelineV3Health, credits: number | null): Promise<void> {
+    const abort = new AbortController();
+    this.abort = abort;
     const tracker = new ProgressTracker();
     this.phase = { kind: "checking", share: 0, waiting: true };
     this.changed();
     try {
       const outcome = await runReview({
         chapters, health, workspaceId: this.data.workspaceId, client: new PipelineV3Client(this.transport()),
-        maxCredits: credits ?? undefined, signal: this.abort.signal,
+        maxCredits: credits ?? undefined, signal: abort.signal,
         callbacks: { onProgress: (p) => { this.phase = { kind: "checking", share: tracker.update(p), waiting: false }; this.changed(); } },
       });
       this.data.lastReview = outcome;
       await this.save();
-      this.phase = { kind: "idle" };
+      this.idle();
       await this.refreshAccount();
     } catch (error) {
-      this.phase = error instanceof PipelineV3Error && error.code === "cancelled" ? { kind: "idle" }
-        : { kind: "error", message: error instanceof Error ? error.message : "The check failed." , charged: error instanceof PipelineV3Error ? error.detail.charged : undefined };
-      this.changed();
-    } finally { this.abort = null; }
+      if (error instanceof PipelineV3Error && error.code === "cancelled") this.idle();
+      else this.fail(error instanceof Error ? error.message : "The check failed.", error instanceof PipelineV3Error ? error.detail.charged : undefined);
+    } finally {
+      if (this.abort === abort) this.abort = null;
+    }
   }
+
+  private idle(): void { this.phase = { kind: "idle" }; this.changed(); }
+  private fail(message: string, charged?: boolean): void { this.phase = { kind: "error", message, charged }; this.changed(); }
 
   cancel(): void { this.abort?.abort(); }
 
@@ -216,18 +282,18 @@ export default class BunshoPlugin extends Plugin {
   async jump(citation: EngineIssueCitation): Promise<void> {
     const file = this.app.vault.getFileByPath(citation.page_id);
     if (!file) { new Notice("That chapter note has been moved or renamed since the check."); return; }
-    const projection = projectMarkdown(await this.noteText(file));
-    const hit = locateQuote(citation, projection, sha256(projection.text));
     const leaf = this.app.workspace.getLeaf(false);
     await leaf.openFile(file);
     const view = leaf.view;
+    if (!(view instanceof MarkdownView)) return;
+    // Offsets come from the editor's own text, so they always match what offsetToPos counts.
+    const projection = projectMarkdown(view.editor.getValue());
+    const hit = locateQuote(citation, projection, sha256(projection.text));
     if (!hit) { new Notice("This passage has changed since the check. Run the check again."); return; }
-    if (view instanceof MarkdownView) {
-      const from = view.editor.offsetToPos(hit.from);
-      const to = view.editor.offsetToPos(hit.to);
-      view.editor.setSelection(from, to);
-      view.editor.scrollIntoView({ from, to }, true);
-    }
+    const from = view.editor.offsetToPos(hit.from);
+    const to = view.editor.offsetToPos(hit.to);
+    view.editor.setSelection(from, to);
+    view.editor.scrollIntoView({ from, to }, true);
   }
 
   async openPanel(): Promise<void> {
@@ -238,9 +304,32 @@ export default class BunshoPlugin extends Plugin {
     await this.app.workspace.revealLeaf(leaf);
   }
 
+  async createManuscriptFolder(): Promise<void> {
+    if (!this.app.vault.getFolderByPath(this.folder)) await this.app.vault.createFolder(this.folder);
+    await this.refreshScan();
+  }
+
   private changed(): void {
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) if (leaf.view instanceof BunshoView) leaf.view.render();
   }
+}
+
+/** The price confirmation every check goes through. Resolves true only on an explicit "Check". */
+function confirmCheck(app: App, chapters: number, words: number, credits: number | null, balance: number | null): Promise<boolean> {
+  return new Promise((resolve) => {
+    let answered = false;
+    const modal = new Modal(app);
+    modal.titleEl.setText("Check manuscript?");
+    modal.contentEl.createEl("p", { text: `${chapters} ${chapters === 1 ? "chapter" : "chapters"}, about ${words.toLocaleString("en-US")} words.` });
+    modal.contentEl.createEl("p", { text: credits === null ? "The price could not be read. You will not be charged more than the engine quotes when it starts."
+      : `This check costs about ${credits.toLocaleString("en-US")} credits${balance === null ? "" : ` (you have ${balance.toLocaleString("en-US")})`}.` });
+    modal.contentEl.createEl("p", { text: "It takes a few minutes. Keep Obsidian open until it finishes.", cls: "bunsho-muted" });
+    new Setting(modal.contentEl)
+      .addButton((b) => b.setButtonText("Not now").onClick(() => { answered = true; resolve(false); modal.close(); }))
+      .addButton((b) => b.setButtonText("Check").setCta().onClick(() => { answered = true; resolve(true); modal.close(); }));
+    modal.onClose = () => { if (!answered) resolve(false); };
+    modal.open();
+  });
 }
 
 class BunshoSettingTab extends PluginSettingTab {
@@ -259,18 +348,19 @@ class BunshoSettingTab extends PluginSettingTab {
       .addText((t) => t.setPlaceholder(DEFAULT_MANUSCRIPT_FOLDER).setValue(this.plugin.data.manuscriptFolder).onChange(async (value) => {
         this.plugin.data.manuscriptFolder = value.trim() || DEFAULT_MANUSCRIPT_FOLDER;
         await this.plugin.save();
-        await this.plugin.refreshScan();
+        this.plugin.scheduleScan();
       }));
-    new Setting(containerEl).setName("Privacy").setDesc("Checking sends your chapter notes to the Bunsho service, over an encrypted connection, only when you press Check manuscript. Nothing is sent otherwise. The plugin sends no analytics.");
-    new Setting(containerEl).setName("Engine address").setDesc("Leave this alone unless Bunsho support asks you to change it.")
+    new Setting(containerEl).setName("Privacy").setDesc("Your chapter notes are sent to the Bunsho service, over an encrypted connection, only when you confirm a check. While the panel is open the plugin also reads your credit balance and the current price. The plugin sends no analytics.");
+    new Setting(containerEl).setName("Engine address").setDesc("Leave this alone unless Bunsho support asks you to change it. Must start with https://.")
       .addText((t) => t.setValue(this.plugin.data.engineUrl).onChange(async (value) => {
-        this.plugin.data.engineUrl = value.trim() || AUTH_CONFIG.engineUrl;
+        const next = value.trim() || AUTH_CONFIG.engineUrl;
+        if (!acceptableEngineUrl(next)) return; // keep the last good address until the text is a valid one
+        this.plugin.data.engineUrl = next;
         await this.plugin.save();
-        this.display();
       }));
-    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/u.test(this.plugin.data.engineUrl)) {
+    if (isLocalEngine(this.plugin.data.engineUrl)) {
       new Setting(containerEl).setName("Developer user id").setDesc("Local engine with AUTH_OPTIONAL only.")
-        .addText((t) => t.setValue(this.plugin.data.devUid).onChange(async (value) => { this.plugin.data.devUid = value.trim(); await this.plugin.save(); await this.plugin.refreshAccount(); }));
+        .addText((t) => t.setValue(this.plugin.data.devUid).onChange(async (value) => { this.plugin.data.devUid = value.trim(); await this.plugin.save(); }));
     }
   }
 }

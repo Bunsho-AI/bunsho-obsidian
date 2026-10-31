@@ -9,6 +9,8 @@
  */
 import { createHash } from "node:crypto";
 import { projectMarkdown, type Projection } from "./projection";
+import { PIPELINE_V3_LIMITS } from "./vendor/pipelineV3.types";
+import { paragraphCount } from "./paragraphs";
 
 export const DEFAULT_MANUSCRIPT_FOLDER = "Manuscript";
 
@@ -55,3 +57,22 @@ export function snapshotId(chapters: readonly Pick<Chapter, "pageId" | "order" |
 
 /** Words for the price line: whitespace-separated runs, a rough count only (never sent anywhere). */
 export const roughWords = (text: string): number => (text.match(/\S+/gu) ?? []).length;
+
+/**
+ * Chapters the engine would refuse, said before anything is sent and naming the note. The engine refuses these too
+ * (uncharged), but with a generic message.
+ */
+export function chapterProblems(chapters: readonly Chapter[]): string[] {
+  const problems: string[] = [];
+  for (const chapter of chapters) {
+    const name = `“${chapter.title}”`;
+    if (chapter.pageId.length > PIPELINE_V3_LIMITS.maxIdChars) problems.push(`${name}: its path is too long. Use a shorter folder or note name.`);
+    else if (chapter.text.length > PIPELINE_V3_LIMITS.maxPageChars
+      || Math.ceil(Buffer.byteLength(chapter.text, "utf8") / PIPELINE_V3_LIMITS.bytesPerTokenEstimate) > PIPELINE_V3_LIMITS.maxPageTokens) {
+      problems.push(`${name} is too long to check as one chapter. Split it into two chapter notes.`);
+    } else if (paragraphCount(chapter.text) > PIPELINE_V3_LIMITS.maxParagraphsPerWholePage) {
+      problems.push(`${name} has more than ${PIPELINE_V3_LIMITS.maxParagraphsPerWholePage.toLocaleString("en-US")} paragraphs. Split it into two chapter notes.`);
+    }
+  }
+  return problems;
+}

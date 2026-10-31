@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import * as http from "node:http";
-import { AuthError, TokenSource, buildGoogleAuthUrl, pkcePair, refreshFirebaseIdToken, waitForAuthorizationCode, type FormPost, type SessionStore } from "../src/auth";
+import { TokenSource, buildGoogleAuthUrl, pkcePair, refreshFirebaseIdToken, waitForAuthorizationCode, type FormPost, type SessionStore } from "../src/auth";
 
 const config = { firebaseApiKey: "key", googleClientId: "cid", googleClientSecret: "secret" };
 const memoryStore = (initial: string | null): SessionStore & { value: string | null } => {
@@ -24,11 +24,18 @@ describe("sign-in building blocks", () => {
     expect(url.searchParams.get("scope")).toBe("openid email profile");
   });
 
-  it("loopback accepts only the matching state", async () => {
+  it("loopback ignores a wrong state and still accepts Google's redirect afterwards", async () => {
     const { port, code } = await waitForAuthorizationCode("good", 5000);
-    const bad = await fetch(`http://127.0.0.1:${port}/callback?code=abc&state=evil`);
-    expect(bad.status).toBe(200);
-    await expect(code).rejects.toBeInstanceOf(AuthError);
+    expect((await fetch(`http://127.0.0.1:${port}/callback?code=evil&state=evil`)).status).toBe(400);
+    expect((await fetch(`http://127.0.0.1:${port}/callback?error=access_denied`)).status).toBe(400);
+    await fetch(`http://127.0.0.1:${port}/callback?code=real&state=good`);
+    await expect(code).resolves.toBe("real");
+  });
+
+  it("loopback reports a cancelled consent with the right state", async () => {
+    const { port, code } = await waitForAuthorizationCode("good", 5000);
+    await fetch(`http://127.0.0.1:${port}/callback?error=access_denied&state=good`);
+    await expect(code).rejects.toMatchObject({ code: "cancelled" });
   });
 
   it("loopback resolves the code and refuses non-callback paths", async () => {
@@ -69,11 +76,24 @@ describe("TokenSource", () => {
     expect(store.value).toBeNull();
   });
 
-  it("keeps the session on a transient failure", async () => {
-    const store = memoryStore("R");
-    const source = new TokenSource(() => Promise.resolve({ status: 503, json: {} }), store, config);
-    await expect(source.idToken()).rejects.toMatchObject({ code: "failed" });
-    expect(store.value).toBe("R");
+  it.each([[503, {}], [429, { error: { message: "QUOTA_EXCEEDED" } }], [403, { error: { message: "API_KEY_HTTP_REFERRER_BLOCKED" } }], [400, { error: { message: "SOMETHING_ELSE" } }]])(
+    "keeps the session on a %i that does not mean the sign-in is dead", async (status, json) => {
+      const store = memoryStore("R");
+      const source = new TokenSource(() => Promise.resolve({ status, json }), store, config);
+      await expect(source.idToken()).rejects.toMatchObject({ code: "failed" });
+      expect(store.value).toBe("R");
+    });
+
+  it("a refresh that finishes after sign-out does not sign the writer back in", async () => {
+    let answer!: (value: { status: number; json: unknown }) => void;
+    const store = memoryStore("R1");
+    const source = new TokenSource(() => new Promise((resolve) => { answer = resolve; }), store, config);
+    const pending = source.idToken();
+    await new Promise((r) => setTimeout(r, 0));
+    await source.signOut();
+    answer({ status: 200, json: { id_token: "ID", refresh_token: "R2", expires_in: "3600" } });
+    await expect(pending).rejects.toMatchObject({ code: "signed_out" });
+    expect(store.value).toBeNull();
   });
 
   it("says sign-in is not set up when the OAuth client is empty", async () => {

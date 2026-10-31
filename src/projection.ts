@@ -18,16 +18,20 @@ export interface Projection {
 
 const FRONTMATTER = /^---[ \t]*\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/;
 
-// Alternatives are tried in order at each position. Groups: 1 link target, 2 link alias, 3/4 star emphasis marks/inner,
-// 5/6 underscore emphasis marks/inner. Underscores need word boundaries (snake_case stays); stars do not (CJK has no spaces).
+// Alternatives are tried in order at each position. Groups: 1 wikilink target, 2 wikilink alias, 3 markdown link text,
+// 4/5 star emphasis marks/inner, 6/7 underscore emphasis marks/inner. Underscores need word boundaries (snake_case
+// stays); stars do not (CJK has no spaces).
 const TOKEN = new RegExp([
   "%%[\\s\\S]*?%%", // comment
+  "<!--[\\s\\S]*?-->", // html comment
   "!\\[\\[[^\\]\\n]*\\]\\]", // embed
   "\\[\\[([^\\]|\\n]*)(?:\\|([^\\]\\n]*))?\\]\\]", // wikilink
+  "(?<!!)\\[([^\\]\\n]+)\\]\\([^)\\n]*\\)", // markdown link: text (group 5)
+  "!\\[[^\\]\\n]*\\]\\([^)\\n]*\\)", // markdown image
   "^[ \\t]*(?:-{3,}|\\*{3,}|_{3,})[ \\t]*$", // scene-break rule line
   "^#{1,6}[ \\t]+", // heading mark
-  "(\\*{1,3})(?=\\S)([^\\n]*?\\S)\\3", // star emphasis
-  "(?<![\\p{L}\\p{N}])(_{1,3})(?=\\S)([^\\n]*?\\S)\\5(?![\\p{L}\\p{N}])", // underscore emphasis
+  "(\\*{1,3})(?=\\S)([^\\n]*?\\S)\\4", // star emphasis
+  "(?<![\\p{L}\\p{N}])(_{1,3})(?=\\S)([^\\n]*?\\S)\\6(?![\\p{L}\\p{N}])", // underscore emphasis
 ].join("|"), "gmu");
 
 export function projectMarkdown(raw: string): Projection {
@@ -49,11 +53,19 @@ export function projectMarkdown(raw: string): Projection {
       const target = match[1] ?? "";
       const alias = match[2];
       if (alias !== undefined) emit(alias, match.index + 2 + target.length + 1);
-      else emit(target, match.index + 2);
-    } else if (match[3] !== undefined && match[4] !== undefined) {
-      emit(match[4], match.index + match[3].length);
-    } else if (match[5] !== undefined && match[6] !== undefined) {
-      emit(match[6], match.index + match[5].length);
+      else {
+        // [[Note#Heading]] and [[Note#^block]] read as "Note"; a same-note [[#Heading]] reads as "Heading".
+        const hash = target.indexOf("#");
+        if (hash > 0) emit(target.slice(0, hash), match.index + 2);
+        else if (hash === 0) { const heading = target.replace(/^#\^?/u, ""); emit(heading, match.index + 2 + target.length - heading.length); }
+        else emit(target, match.index + 2);
+      }
+    } else if (match[3] !== undefined) {
+      emit(match[3], match.index + 1);
+    } else if (match[4] !== undefined && match[5] !== undefined) {
+      emit(match[5], match.index + match[4].length);
+    } else if (match[6] !== undefined && match[7] !== undefined) {
+      emit(match[7], match.index + match[6].length);
     }
     pos = match.index + whole.length; // comments, embeds, rules and heading marks emit nothing
   }

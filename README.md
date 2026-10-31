@@ -27,7 +27,7 @@ Manuscript/
 
 1. Install and enable the plugin, then open **Bunsho** from the ribbon or the command palette.
 2. Sign in with Google.
-3. Press **Check manuscript**. The panel shows the credit price first. A check takes a few minutes; keep Obsidian open while it runs.
+3. Press **Check manuscript** (or run it from the command palette). Bunsho shows the credit price and asks before anything is spent. A check takes a few minutes; keep Obsidian open while it runs.
 4. Review findings. **Go to passage** selects the quoted text in your note; **Dismiss** hides a finding you have decided is fine.
 
 Checking only ever runs when you press the button. Writing is never metered.
@@ -36,7 +36,7 @@ Checking only ever runs when you press the button. Writing is never metered.
 
 - **Account required.** Checking needs a Bunsho account and credits.
 - **Payment.** A check is paid for with Bunsho credits. Credits are bought at bunsho.io, not inside the plugin.
-- **Network use.** When you press **Check manuscript**, the plugin sends the text of your chapter notes to the Bunsho service (`engine.bunsho.io`) over an encrypted connection to be checked, and receives the findings. It also contacts Google and Firebase to sign you in, and the Bunsho service to read your credit balance. Nothing is sent at any other time.
+- **Network use.** When you confirm a check, the plugin sends the text of your chapter notes to the Bunsho service (`engine.bunsho.io`) over an encrypted connection to be checked, and receives the findings. While you are signed in it also reads your credit balance and the current price from the Bunsho service (when Obsidian starts, when the panel opens and after a check), and it contacts Google and Firebase to sign you in and keep you signed in. Requests carry a random install id generated on this machine and the plugin version; the install id protects the free starter allowance from abuse. Your notes are not sent at any other time.
 - **Telemetry.** The plugin sends no analytics or telemetry. The Bunsho service keeps the account and billing records needed to charge credits; see the privacy policy at https://bunsho.io/privacy.
 - **Stored on your machine.** Findings and dismissals live in the plugin's `data.json`. Your sign-in is kept in Obsidian's secret storage (or in `data.json` on Obsidian versions without it).
 - **Open source.** The plugin is a thin client under the MIT license. Detection runs in the Bunsho service.

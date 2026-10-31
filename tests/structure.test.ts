@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildChapters, snapshotId } from "../src/structure";
+import { buildChapters, chapterProblems, snapshotId } from "../src/structure";
 
 const note = (name: string, text: string) => ({ path: `Manuscript/${name}.md`, basename: name, text });
 
@@ -28,5 +28,21 @@ describe("buildChapters", () => {
     const b = buildChapters([note("01 A", "Hello!")]).chapters;
     expect(snapshotId(a)).toMatch(/^[a-f0-9]{64}$/);
     expect(snapshotId(a)).not.toBe(snapshotId(b));
+  });
+});
+
+describe("chapterProblems", () => {
+  it("names a chapter with too many paragraphs before anything is sent", () => {
+    const { chapters } = buildChapters([note("07 Long", Array.from({ length: 1201 }, (_, i) => `Line ${i}.`).join("\n"))]);
+    expect(chapterProblems(chapters)[0]).toContain("07 Long");
+  });
+
+  it("names a chapter that is too long", () => {
+    const { chapters } = buildChapters([note("08 Huge", "word ".repeat(31_000))]);
+    expect(chapterProblems(chapters)[0]).toMatch(/08 Huge.*too long/);
+  });
+
+  it("accepts ordinary chapters", () => {
+    expect(chapterProblems(buildChapters([note("01 A", "Hello.")]).chapters)).toEqual([]);
   });
 });

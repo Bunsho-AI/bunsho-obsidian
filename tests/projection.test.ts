@@ -35,6 +35,16 @@ describe("projectMarkdown", () => {
     expect(raw.slice(p.toSource(start), p.toSourceEnd(start + quote.length))).toBe("eyes were *green");
   });
 
+  it("reads link anchors and markdown links as their visible words", () => {
+    const raw = "See [[Harbour#^b1]], [[#The Fire]], [the map](maps/one.md) and ![pic](a.png).<!-- hidden -->";
+    const p = projectMarkdown(raw);
+    expect(p.text).toBe("See Harbour, The Fire, the map and .");
+    const at = p.text.indexOf("the map");
+    expect(raw.slice(p.toSource(at), p.toSourceEnd(at + 7))).toBe("the map");
+    const fire = p.text.indexOf("The Fire");
+    expect(raw.slice(p.toSource(fire), p.toSourceEnd(fire + 8))).toBe("The Fire");
+  });
+
   it("works for any script (no word lists)", () => {
     const p = projectMarkdown("# 第一章\n彼女は**黙って**部屋を出た。");
     expect(p.text).toBe("第一章\n彼女は黙って部屋を出た。");

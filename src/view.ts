@@ -1,6 +1,5 @@
 import { ItemView, type WorkspaceLeaf } from "obsidian";
 import type BunshoPlugin from "./main";
-import { snapshotId } from "./structure";
 import type { EngineIssue } from "./vendor/engine.types";
 
 export const VIEW_TYPE = "bunsho-continuity";
@@ -60,16 +59,17 @@ export class BunshoView extends ItemView {
     rules.createEl("li", { text: "Chapters are read in name order, so number them: 01, 02, ... 10." });
     rules.createEl("li", { text: "One paragraph per line." });
     if (scan.status === "no_folder") {
-      box.createEl("button", { text: `Create “${folder}” folder` }).onclick = async () => {
-        await this.app.vault.createFolder(folder).catch(() => undefined);
-        await this.plugin.refreshScan();
-      };
+      box.createEl("button", { text: `Create “${folder}” folder` }).onclick = () => void this.plugin.createManuscriptFolder();
     }
   }
 
   private renderCheck(root: HTMLElement): void {
     const { phase, account } = this.plugin;
     const box = root.createDiv({ cls: "bunsho-box" });
+    if (phase.kind === "preparing") {
+      box.createEl("p", { text: "Reading your chapters and the current price...", cls: "bunsho-muted" });
+      return;
+    }
     if (phase.kind === "checking") {
       const bar = box.createDiv({ cls: "bunsho-bar" });
       bar.createDiv({ cls: "bunsho-bar-fill" }).style.width = `${Math.round(phase.share * 100)}%`;
@@ -81,7 +81,7 @@ export class BunshoView extends ItemView {
     const price = this.plugin.price();
     const short = account.balance !== null && price !== null && account.balance < price;
     const button = box.createEl("button", { text: "Check manuscript", cls: "mod-cta" });
-    button.disabled = !account.signedIn || short;
+    button.disabled = !account.signedIn;
     button.onclick = () => void this.plugin.check();
     if (account.signedIn && price !== null) {
       box.createEl("p", { text: `About ${price.toLocaleString("en-US")} credits${account.balance !== null ? ` · you have ${account.balance.toLocaleString("en-US")}` : ""}`, cls: "bunsho-muted" });
@@ -97,7 +97,7 @@ export class BunshoView extends ItemView {
     const dismissed = new Set(this.plugin.data.dismissed);
     const open = review.issues.filter((i) => !dismissed.has(i.issue_id));
     const hidden = review.issues.length - open.length;
-    const edited = scan.status === "ready" && snapshotId(scan.chapters) !== review.snapshotId;
+    const edited = scan.status === "ready" && scan.snapshotId !== review.snapshotId;
 
     const head = root.createDiv({ cls: "bunsho-findings-head" });
     head.createEl("h4", { text: open.length === 0 ? "No contradictions found" : `${open.length} ${open.length === 1 ? "finding" : "findings"}` });

@@ -77,17 +77,20 @@ export function waitForAuthorizationCode(state: string, timeoutMs = SIGN_IN_TIME
     server.on("request", (req, res) => {
       const url = new URL(req.url ?? "/", "http://127.0.0.1");
       if (url.pathname !== "/callback") { res.writeHead(204, { Connection: "close" }); res.end(); return; }
-      const reply = (page: string) => { res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", Connection: "close" }); res.end(page); };
-      const authorised = url.searchParams.get("state") === state && url.searchParams.get("code");
-      if (!authorised) {
-        reply(PAGE("Sign-in didn't complete.", "Return to Obsidian and try again."));
-        clearTimeout(timer); stop();
-        settle.reject(new AuthError(url.searchParams.get("error") ? "cancelled" : "failed", "Sign-in did not complete."));
+      // Only Google's redirect carries our state. Anything else on this port (another local process, a page probing ports)
+      // is answered and ignored, so it can neither finish nor cancel the sign-in.
+      if (url.searchParams.get("state") !== state) { res.writeHead(400, { Connection: "close" }); res.end(); return; }
+      const code = url.searchParams.get("code");
+      const finish = (page: string, done: () => void) => {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", Connection: "close" });
+        res.end(page, () => { clearTimeout(timer); stop(); done(); });
+      };
+      if (!code) {
+        finish(PAGE("Sign-in didn't complete.", "Return to Obsidian and try again."),
+          () => settle.reject(new AuthError("cancelled", "Sign-in did not complete.")));
         return;
       }
-      reply(PAGE("You're signed in.", "You can close this tab and return to Obsidian."));
-      clearTimeout(timer); stop();
-      settle.resolve(url.searchParams.get("code")!);
+      finish(PAGE("You're signed in.", "You can close this tab and return to Obsidian."), () => settle.resolve(code));
     });
     server.on("error", rejectStart);
     server.listen(0, "127.0.0.1", () => resolveStart({ port: (server.address() as { port: number }).port, code }));
@@ -121,11 +124,20 @@ export async function firebaseSignInWithGoogle(post: FormPost, config: AuthConfi
   return firebaseTokens(json, "idp");
 }
 
+/** securetoken answers that mean the refresh token itself is no good (as opposed to quota, network or key problems). */
+const DEAD_SESSION = ["TOKEN_EXPIRED", "USER_DISABLED", "USER_NOT_FOUND", "INVALID_REFRESH_TOKEN", "INVALID_GRANT_TYPE", "MISSING_REFRESH_TOKEN"];
+
+export function deadSession(status: number, json: unknown): boolean {
+  if (status !== 400 && status !== 401) return false;
+  const message = record(json) && record(json.error) && typeof json.error.message === "string" ? json.error.message : "";
+  return DEAD_SESSION.some((code) => message.startsWith(code));
+}
+
 export async function refreshFirebaseIdToken(post: FormPost, config: AuthConfigShape, refreshToken: string): Promise<FirebaseTokens> {
   const body = new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken }).toString();
   const { status, json } = await post(`https://securetoken.googleapis.com/v1/token?key=${config.firebaseApiKey}`, body, "application/x-www-form-urlencoded");
-  if (status >= 400 && status < 500) throw new AuthError("signed_out", "Your Bunsho sign-in has expired. Sign in again.");
-  if (status < 200 || status >= 300) throw new AuthError("failed", "Could not reach Bunsho to refresh your sign-in.");
+  if (deadSession(status, json)) throw new AuthError("signed_out", "Your Bunsho sign-in has expired. Sign in again.");
+  if (status < 200 || status >= 300) throw new AuthError("failed", "Could not reach Bunsho to refresh your sign-in. Try again shortly.");
   return firebaseTokens(json, "refresh");
 }
 
@@ -133,6 +145,8 @@ export async function refreshFirebaseIdToken(post: FormPost, config: AuthConfigS
 export class TokenSource {
   private cached: { idToken: string; expiresAt: number } | null = null;
   private inflight: Promise<string> | null = null;
+  /** Bumped by sign-out: a refresh that started before it must not write its token back. */
+  private generation = 0;
   email: string | undefined;
 
   constructor(private readonly post: FormPost, private readonly store: SessionStore, private readonly config: AuthConfigShape = AUTH_CONFIG,
@@ -147,15 +161,17 @@ export class TokenSource {
   }
 
   private async refresh(): Promise<string> {
+    const generation = this.generation;
     const refreshToken = await this.store.get();
     if (!refreshToken) throw new AuthError("signed_out", "Sign in to check your manuscript.");
     try {
       const tokens = await refreshFirebaseIdToken(this.post, this.config, refreshToken);
+      if (generation !== this.generation) throw new AuthError("signed_out", "Signed out.");
       await this.store.set(tokens.refreshToken);
       this.cached = { idToken: tokens.idToken, expiresAt: this.now() + tokens.expiresInSeconds * 1000 };
       return tokens.idToken;
     } catch (error) {
-      if (error instanceof AuthError && error.code === "signed_out") { this.cached = null; await this.store.clear(); }
+      if (error instanceof AuthError && error.code === "signed_out" && generation === this.generation) { this.cached = null; await this.store.clear(); }
       throw error;
     }
   }
@@ -169,12 +185,14 @@ export class TokenSource {
     const { port, code } = await waitForAuthorizationCode(state);
     const redirectUri = `http://127.0.0.1:${port}/callback`;
     openUrl(buildGoogleAuthUrl(this.config.googleClientId, redirectUri, challenge, state));
+    const generation = ++this.generation;
     const googleIdToken = await exchangeGoogleCode(this.post, this.config, await code, verifier, redirectUri);
     const tokens = await firebaseSignInWithGoogle(this.post, this.config, googleIdToken);
+    if (generation !== this.generation) throw new AuthError("cancelled", "Sign-in was cancelled.");
     await this.store.set(tokens.refreshToken);
     this.email = tokens.email;
     this.cached = { idToken: tokens.idToken, expiresAt: this.now() + tokens.expiresInSeconds * 1000 };
   }
 
-  async signOut(): Promise<void> { this.cached = null; await this.store.clear(); }
+  async signOut(): Promise<void> { this.generation++; this.cached = null; this.inflight = null; await this.store.clear(); }
 }
