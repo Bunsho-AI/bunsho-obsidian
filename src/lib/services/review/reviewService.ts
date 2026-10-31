@@ -1,11 +1,11 @@
 /** One whole-manuscript review: build the request from chapters, run it, and keep only findings grounded in the text sent. */
 import { randomUUID } from "node:crypto";
-import type { Chapter } from "./structure";
-import { snapshotId } from "./structure";
-import { PipelineV3Client, type PipelineV3ReviewCallbacks } from "./vendor/pipelineV3Client";
-import type { EngineIssue } from "./vendor/engine.types";
-import { groundIssues, type GroundingPage } from "./vendor/grounding";
-import type { PipelineV3Health, PipelineV3Result } from "./vendor/pipelineV3.types";
+import type { Chapter } from "@/helpers/chapters";
+import { snapshotId } from "@/helpers/chapters";
+import { PipelineV3Client, type PipelineV3ReviewCallbacks } from "@/lib/contract/pipelineV3Client";
+import type { EngineIssue } from "@/lib/contract/engine.types";
+import { groundIssues, type GroundingPage } from "@/lib/contract/grounding";
+import type { PipelineV3Health, PipelineV3Result } from "@/lib/contract/pipelineV3.types";
 
 export interface ChapterMeta { pageId: string; title: string; order: number; rev: string }
 

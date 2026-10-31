@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/bunsho-logo-white.png">
+    <img src="docs/bunsho-logo-dark.png" alt="Bunsho" width="260">
+  </picture>
+</p>
+
 # Bunsho for Obsidian
 
 Find continuity errors in your novel: a character's eye colour that changes, a timeline that cannot work, someone who knows what they were never told. Each finding quotes both passages and jumps you to them.
@@ -57,4 +64,30 @@ Local sign-in settings are read at build time from `BUNSHO_FIREBASE_API_KEY`, `B
 
 Releasing: bump `version` in `manifest.json` and `package.json`, add it to `versions.json`, then push a tag equal to the version (no leading `v`). The release workflow lints, tests, builds from source and attaches `main.js`, `manifest.json` and `styles.css` to a draft GitHub release.
 
-`src/vendor/` holds modules copied from the Bunsho desktop app (the review wire contract, pricing, and citation grounding). They are one contract with the engine; change them together.
+## Code structure
+
+Atomic layers. A file may import from layers below it in this list, never above:
+
+```
+src/
+  main.ts            plugin entry: icon, view, commands, settings; hands everything to the controller
+  pages/             what Obsidian mounts: ContinuityView (panel), SettingsTab, ConfirmCheckModal
+  organisms/         SignInPanel, ManuscriptHelp, FindingCard, FindingsList
+  molecules/         BrandHeader, StatusRow, GroupHeader, Passage, AlertCard, EmptyState
+  atoms/             TextAction, FillButton, QuietButton, Fact, SeverityLabel, BunshoMark
+  controllers/       ContinuityController: state and actions (the "hooks" layer for a non-React app)
+  types/             shared state and persisted-data types
+  lib/obsidian/      Obsidian API glue: vault reading, secret storage, selecting a passage
+  lib/services/      engine access: auth (Google sign-in), engine (HTTP), review (WebSocket), project (free plan)
+  helpers/           Bunsho domain logic, pure: chapters, quote location, progress, one-project state
+  lib/contract/      the engine wire contract, copied from the desktop app (change with the engine)
+  assets/            the Bunsho mark (SVG)
+  utils/             generic pure functions: markdown projection, hashing, formatting, URLs
+```
+
+- Only `pages/` read the controller; organisms, molecules and atoms take plain props and callbacks.
+- Atoms import nothing app-specific except the logo asset; nothing below `controllers/` touches the Obsidian UI.
+- Only `lib/services/` and `lib/contract/` talk to the network.
+- Each component lives in its own folder with an `index.ts`. Imports use the `@/` alias for `src/`.
+
+`src/lib/contract/` holds modules copied from the Bunsho desktop app (the review wire contract, pricing, and citation grounding). They are one contract with the engine; change them together.

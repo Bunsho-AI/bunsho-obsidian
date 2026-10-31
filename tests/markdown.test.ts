@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { projectMarkdown } from "../src/projection";
+import { projectMarkdown } from "@/utils/markdown";
 
 describe("projectMarkdown", () => {
   it("leaves plain prose untouched, offsets identity", () => {

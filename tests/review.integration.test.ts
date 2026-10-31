@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { startMockEngine } from "../scripts/mock-engine.mjs";
-import { PipelineV3Client, PipelineV3Error } from "../src/vendor/pipelineV3Client";
-import { parsePipelineV3Health } from "../src/vendor/pipelineV3Frames";
-import { runReview } from "../src/review";
-import { buildChapters } from "../src/structure";
+import { PipelineV3Client, PipelineV3Error } from "@/lib/contract/pipelineV3Client";
+import { parsePipelineV3Health } from "@/lib/contract/pipelineV3Frames";
+import { runReview } from "@/lib/services/review/reviewService";
+import { buildChapters } from "@/helpers/chapters";
 
 const note = (name: string, text: string) => ({ path: `Manuscript/${name}.md`, basename: name, text });
 const { chapters } = buildChapters([
@@ -62,20 +62,19 @@ describe("a review against the engine protocol", () => {
   });
 
   it("completes with browser-style timers (Obsidian's renderer: setTimeout returns a number, no unref)", async () => {
-    const real = globalThis.setTimeout;
-    const realClear = globalThis.clearTimeout;
-    const timers = new Map<number, ReturnType<typeof real>>();
+    const win = window as unknown as { setTimeout: typeof setTimeout; clearTimeout: typeof clearTimeout };
+    const [realSet, realClear] = [win.setTimeout, win.clearTimeout];
+    const timers = new Map<number, ReturnType<typeof setTimeout>>();
     let next = 1;
-    const domLike = ((fn: () => void, ms?: number) => { const id = next++; timers.set(id, real(fn, ms)); return id; }) as unknown as typeof setTimeout;
-    const { client, health } = await clientFor({ holdOpen: true });
-    globalThis.setTimeout = domLike;
-    globalThis.clearTimeout = ((id: unknown) => { const t = timers.get(id as number); if (t) realClear(t); else realClear(id as ReturnType<typeof real>); }) as typeof clearTimeout;
+    win.setTimeout = ((fn: () => void, ms?: number) => { const id = next++; timers.set(id, globalThis.setTimeout(fn, ms)); return id; }) as unknown as typeof setTimeout;
+    win.clearTimeout = ((id: unknown) => { const t = timers.get(id as number); if (t) globalThis.clearTimeout(t); }) as typeof clearTimeout;
     try {
+      const { client, health } = await clientFor({ holdOpen: true });
       const outcome = await runReview({ chapters, health, workspaceId: "w", client });
       expect(outcome.issues).toHaveLength(1);
     } finally {
-      globalThis.setTimeout = real;
-      globalThis.clearTimeout = realClear;
+      win.setTimeout = realSet;
+      win.clearTimeout = realClear;
     }
   });
 

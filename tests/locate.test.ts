@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { projectMarkdown } from "../src/projection";
-import { locateQuote } from "../src/locate";
-import { sha256 } from "../src/structure";
+import { projectMarkdown } from "@/utils/markdown";
+import { locateQuote } from "@/helpers/locate";
+import { sha256 } from "@/utils/hash";
 
 const raw = "# One\nHer eyes were *green*.\nLater, her eyes were green again.\n";
 const projection = projectMarkdown(raw);

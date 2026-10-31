@@ -1,5 +1,5 @@
 /** Overall share of a review from the engine's per-stage progress (desktop pipelineV3Progress.ts weights). */
-import type { ClaimsProgress, ClaimsStage } from "./vendor/pipelineV3.types";
+import type { ClaimsProgress, ClaimsStage } from "@/lib/contract/pipelineV3.types";
 
 const GROUPS: ReadonlyArray<{ weight: number; stages: readonly ClaimsStage[] }> = [
   { weight: 0.4, stages: ["read"] },

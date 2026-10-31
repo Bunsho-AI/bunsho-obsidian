@@ -1,6 +1,6 @@
 /** Where a finding's quote sits in the note now, as note offsets, or null when the passage has changed since the check. */
-import type { Projection } from "./projection";
-import type { EngineIssueCitation } from "./vendor/engine.types";
+import type { Projection } from "@/utils/markdown";
+import type { EngineIssueCitation } from "@/lib/contract/engine.types";
 
 export function locateQuote(citation: Pick<EngineIssueCitation, "quoted_text" | "source_ref">, projection: Projection, rev: string | null): { from: number; to: number } | null {
   const quote = citation.quoted_text;

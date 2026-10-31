@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { projectState } from "../src/project";
+import { projectState } from "@/helpers/project";
 
 const reg = (workspaceId: string, name: string | null = "Harbour") => ({ registration: { workspaceId, name, registeredAt: "2026-10-31T00:00:00Z", revision: 1 } });
 

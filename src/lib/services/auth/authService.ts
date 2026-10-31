@@ -11,7 +11,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import * as http from "node:http";
-import { AUTH_CONFIG } from "./authConfig";
+import { AUTH_CONFIG } from "@/lib/services/auth/authConfig";
 
 export type FormPost = (url: string, body: string, contentType: "application/x-www-form-urlencoded" | "application/json")
   => Promise<{ status: number; json: unknown }>;

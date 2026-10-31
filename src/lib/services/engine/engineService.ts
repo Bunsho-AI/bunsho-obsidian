@@ -1,7 +1,7 @@
 /** HTTP to the Bunsho engine through Obsidian's requestUrl (no CORS), with the writer's Firebase ID token. */
 import { requestUrl } from "obsidian";
-import type { FormPost, TokenSource } from "./auth";
-import type { PipelineV3Transport } from "./vendor/pipelineV3Client";
+import type { FormPost, TokenSource } from "@/lib/services/auth/authService";
+import type { PipelineV3Transport } from "@/lib/contract/pipelineV3Client";
 
 export const CLIENT_NAME = "obsidian";
 

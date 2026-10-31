@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildChapters, chapterProblems, snapshotId } from "../src/structure";
+import { buildChapters, chapterProblems, snapshotId } from "@/helpers/chapters";
 
 const note = (name: string, text: string) => ({ path: `Manuscript/${name}.md`, basename: name, text });
 

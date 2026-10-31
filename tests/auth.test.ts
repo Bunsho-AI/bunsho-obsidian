@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import * as http from "node:http";
-import { TokenSource, buildGoogleAuthUrl, pkcePair, refreshFirebaseIdToken, waitForAuthorizationCode, type FormPost, type SessionStore } from "../src/auth";
+import { TokenSource, buildGoogleAuthUrl, pkcePair, refreshFirebaseIdToken, waitForAuthorizationCode, type FormPost, type SessionStore } from "@/lib/services/auth/authService";
 
 const config = { firebaseApiKey: "key", googleClientId: "cid", googleClientSecret: "secret" };
 const memoryStore = (initial: string | null): SessionStore & { value: string | null } => {

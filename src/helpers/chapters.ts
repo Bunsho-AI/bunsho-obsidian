@@ -7,12 +7,21 @@
  *
  * A paragraph is one line of a note. Frontmatter, %%comments%% and embeds are not part of the text.
  */
-import { createHash } from "node:crypto";
-import { projectMarkdown, type Projection } from "./projection";
-import { PIPELINE_V3_LIMITS } from "./vendor/pipelineV3.types";
-import { paragraphCount } from "./paragraphs";
+import { sha256 } from "@/utils/hash";
+import { projectMarkdown, type Projection } from "@/utils/markdown";
+import { PIPELINE_V3_LIMITS } from "@/lib/contract/pipelineV3.types";
+import { paragraphCount } from "@/utils/paragraphs";
 
 export const DEFAULT_MANUSCRIPT_FOLDER = "Manuscript";
+
+/** The folder setting without leading or trailing slashes. */
+export const normalizeFolder = (folder: string): string => folder.replace(/^\/+|\/+$/gu, "");
+
+/** A chapter note: a markdown file directly inside the manuscript folder (not in a subfolder). */
+export function isChapterPath(path: string, folder: string): boolean {
+  const root = normalizeFolder(folder);
+  return path.endsWith(".md") && path.startsWith(`${root}/`) && !path.slice(root.length + 1).includes("/");
+}
 
 export interface NoteInput { path: string; basename: string; text: string }
 
@@ -31,7 +40,6 @@ export interface Chapter {
 
 export interface SkippedNote { path: string; reason: "empty" }
 
-export const sha256 = (text: string): string => createHash("sha256").update(text, "utf8").digest("hex");
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 

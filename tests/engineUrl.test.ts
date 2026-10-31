@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { acceptableEngineUrl } from "../src/engineUrl";
+import { acceptableEngineUrl } from "@/utils/url";
 
 describe("acceptableEngineUrl", () => {
   it("allows https and local http only", () => {

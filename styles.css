@@ -108,3 +108,12 @@ button.bunsho-quiet { font-size: var(--font-ui-small); }
 .bunsho-actions { display: flex; gap: 12px; flex: none; }
 
 .bunsho-footer { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+/* Brand: the Bunsho mark (b in text colour, sparkle in brand amber) */
+.bunsho-mark { display: inline-flex; width: var(--bunsho-mark-size, 16px); height: var(--bunsho-mark-size, 16px); color: var(--text-normal); flex: none; }
+.bunsho-mark svg { width: 100%; height: 100%; }
+.bunsho-mark-sparkle { fill: var(--bunsho-accent); }
+.bunsho-brand { display: flex; align-items: center; gap: 7px; padding: 10px 12px 0; }
+.bunsho-brand-name { font-family: var(--bunsho-font-quote); font-size: 14px; color: var(--text-normal); }
+.bunsho-signin .bunsho-mark { margin-bottom: 14px; }
+.bunsho-muted { color: var(--text-muted); font-size: var(--font-ui-small); }
