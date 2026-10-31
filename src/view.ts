@@ -11,7 +11,7 @@ import type { EngineIssue, EngineIssueCitation } from "./vendor/engine.types";
 
 export const VIEW_TYPE = "bunsho-continuity";
 
-export const UPGRADE_URL = "https://bunsho.io/pricing";
+export const UPGRADE_URL = "https://bunsho.io/#pricing";
 
 const STAGE_LABEL: Record<string, string> = {
   read: "reading chapters", cast: "finding the cast", search: "searching the book", triage: "sorting leads",
@@ -137,6 +137,7 @@ export class BunshoView extends ItemView {
       const box = body.createDiv({ cls: "bunsho-empty" });
       box.createDiv({ cls: "bunsho-empty-title", text: "Nothing has been checked yet" });
       box.createEl("p", { cls: "bunsho-empty-body", text: "Bunsho reads every chapter and shows where your story contradicts itself, quoting both passages. You see the price before anything is spent." });
+      if (this.plugin.phase.kind !== "idle" && this.plugin.phase.kind !== "error") return; // a check is starting or running: the status row says so
       const price = this.plugin.price();
       const button = box.createEl("button", { cls: "bunsho-fill", text: price === null ? "Check manuscript" : `Check manuscript \u00b7 ~${fmt(price)} credits` });
       button.onclick = () => void this.plugin.check();
