@@ -1,7 +1,8 @@
 import { type App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, MarkdownView, type WorkspaceLeaf } from "obsidian";
 import { AUTH_CONFIG } from "./authConfig";
 import { AuthError, TokenSource, type SessionStore } from "./auth";
-import { formPost, makeTransport, readBalance } from "./connection";
+import { formPost, makeTransport, postJson, readBalance, tryGetJson, type ConnectionOptions } from "./connection";
+import { projectState, type ProjectState } from "./project";
 import { acceptableEngineUrl, isLocalEngine } from "./engineUrl";
 import { locateQuote } from "./locate";
 import { projectMarkdown } from "./projection";
@@ -37,10 +38,20 @@ export type Phase =
   | { kind: "idle" }
   | { kind: "preparing" }
   | { kind: "confirming" }
-  | { kind: "checking"; share: number; waiting: boolean }
+  | { kind: "checking"; share: number; waiting: boolean; stage?: string }
   | { kind: "error"; message: string; charged?: boolean };
 
-export interface Account { signedIn: boolean; balance: number | null; health: PipelineV3Health | null; problem: string | null }
+export interface Account {
+  signedIn: boolean;
+  balance: number | null;
+  health: PipelineV3Health | null;
+  problem: string | null;
+  /** The Free tier's one-project rule for this manuscript (see project.ts). */
+  project: ProjectState;
+  registeredName: string | null;
+}
+
+const SIGNED_OUT: Account = { signedIn: false, balance: null, health: null, problem: null, project: "unknown", registeredName: null };
 
 /** Obsidian's editor holds LF text; files written elsewhere may have CRLF. One line-ending everywhere keeps offsets aligned. */
 const lf = (text: string): string => text.replace(/\r\n?/gu, "\n");
@@ -49,7 +60,7 @@ export default class BunshoPlugin extends Plugin {
   data!: PluginData;
   scan: Scan = { status: "no_folder" };
   phase: Phase = { kind: "idle" };
-  account: Account = { signedIn: false, balance: null, health: null, problem: null };
+  account: Account = SIGNED_OUT;
   private tokens!: TokenSource;
   private abort: AbortController | null = null;
   private scanTimer: number | undefined;
@@ -107,9 +118,17 @@ export default class BunshoPlugin extends Plugin {
 
   private get devUid(): string | undefined { return isLocalEngine(this.data.engineUrl) && this.data.devUid ? this.data.devUid : undefined; }
 
-  private transport() {
-    return makeTransport({ baseUrl: this.data.engineUrl, tokens: this.tokens, installId: this.data.installId, version: this.manifest.version,
-      devUid: this.devUid, logger: { warn: (m, x) => console.warn(`[Bunsho] ${m}`, x), info: () => undefined } });
+  private connection(): ConnectionOptions {
+    return { baseUrl: this.data.engineUrl, tokens: this.tokens, installId: this.data.installId, version: this.manifest.version,
+      devUid: this.devUid, logger: { warn: (m, x) => console.warn(`[Bunsho] ${m}`, x), info: () => undefined } };
+  }
+
+  private transport() { return makeTransport(this.connection()); }
+
+  /** The last review, when it is about this manuscript folder (the setting may have changed since). */
+  currentReview(): ReviewOutcome | null {
+    const review = this.data.lastReview;
+    return review && review.chapters.every((c) => this.inManuscript(c.pageId)) ? review : null;
   }
 
   private get folder(): string { return this.data.manuscriptFolder.replace(/^\/+|\/+$/gu, ""); }
@@ -158,14 +177,18 @@ export default class BunshoPlugin extends Plugin {
   async refreshAccount(): Promise<void> {
     const seq = ++this.accountSeq;
     const signedIn = (await this.tokens.signedIn()) || Boolean(this.devUid);
-    let next: Account = { signedIn, balance: null, health: null, problem: null };
+    let next: Account = { ...SIGNED_OUT, signedIn };
     if (signedIn) {
       try {
         const transport = this.transport();
-        const [health, balance] = await Promise.all([new PipelineV3Client(transport).health(), readBalance(transport)]);
-        next = { signedIn, health, balance, problem: null };
+        const [health, balance, subscription, registration] = await Promise.all([
+          new PipelineV3Client(transport).health(), readBalance(transport),
+          tryGetJson(transport, "/v1/billing/subscription"), tryGetJson(transport, "/v1/projects/registration"),
+        ]);
+        const project = projectState(subscription, registration, this.data.workspaceId);
+        next = { signedIn, health, balance, problem: null, project: project.state, registeredName: project.registeredName };
       } catch (error) {
-        next = error instanceof AuthError && error.code === "signed_out" ? { signedIn: false, balance: null, health: null, problem: error.message }
+        next = error instanceof AuthError && error.code === "signed_out" ? { ...SIGNED_OUT, problem: error.message }
           : { ...next, problem: error instanceof PipelineV3Error || error instanceof AuthError ? error.message : "Could not reach Bunsho. Check your connection." };
       }
     }
@@ -217,6 +240,7 @@ export default class BunshoPlugin extends Plugin {
         await this.openPanel();
         return this.idle();
       }
+      if (account.project === "blocked") return this.idle(); // the panel explains the free plan's one project
       const problems = chapterProblems(scan.chapters);
       if (problems.length > 0) return this.fail(problems[0]);
       const credits = this.price();
@@ -227,6 +251,10 @@ export default class BunshoPlugin extends Plugin {
       this.changed();
       const confirmed = await confirmCheck(this.app, scan.chapters.length, scan.words, credits, account.balance);
       if (!confirmed) return this.idle();
+      if (account.project === "unregistered") {
+        // The free plan's one project becomes this manuscript, on the writer's first confirmed check.
+        await postJson(this.connection(), "/v1/projects/registration", { workspaceId: this.data.workspaceId, name: this.projectName() });
+      }
       await this.runConfirmed(scan.chapters, account.health, credits);
     } catch (error) {
       this.fail(error instanceof Error ? error.message : "The check failed.");
@@ -243,7 +271,7 @@ export default class BunshoPlugin extends Plugin {
       const outcome = await runReview({
         chapters, health, workspaceId: this.data.workspaceId, client: new PipelineV3Client(this.transport()),
         maxCredits: credits ?? undefined, signal: abort.signal,
-        callbacks: { onProgress: (p) => { this.phase = { kind: "checking", share: tracker.update(p), waiting: false }; this.changed(); } },
+        callbacks: { onProgress: (p) => { this.phase = { kind: "checking", share: tracker.update(p), waiting: false, stage: p.stage }; this.changed(); } },
       });
       this.data.lastReview = outcome;
       await this.save();
@@ -255,6 +283,12 @@ export default class BunshoPlugin extends Plugin {
     } finally {
       if (this.abort === abort) this.abort = null;
     }
+  }
+
+  /** How the free project is named on every surface ("Your free project is …"): the vault, and the folder when it is not the default. */
+  private projectName(): string {
+    const vault = this.app.vault.getName();
+    return this.folder === DEFAULT_MANUSCRIPT_FOLDER ? vault : `${vault} / ${this.folder}`;
   }
 
   private idle(): void { this.phase = { kind: "idle" }; this.changed(); }

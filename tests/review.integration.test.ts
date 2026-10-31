@@ -79,6 +79,12 @@ describe("a review against the engine protocol", () => {
     }
   });
 
+  it("relays the engine's one-project refusal for a free account, uncharged", async () => {
+    const { client, health } = await clientFor({ registered: { workspaceId: "another", name: "Nine Fathoms" } });
+    await expect(runReview({ chapters, health, workspaceId: "w", client })).rejects.toSatisfy(
+      (e) => e instanceof PipelineV3Error && e.detail.charged === false && e.message.includes("Nine Fathoms"));
+  });
+
   it("cancels cleanly", async () => {
     const { client, health } = await clientFor();
     const controller = new AbortController();

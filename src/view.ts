@@ -1,13 +1,30 @@
+/**
+ * The Bunsho panel. Mirrors the desktop Continuity tab (warm-paper redesign): one status row of machine fact with the
+ * single priced action, at most one alert card, findings grouped as "Open contradiction" / "Worth a look", and a
+ * collapsed footer for findings marked "Not an error". Colours come from the writer's Obsidian theme; layout, type
+ * roles, severity grammar, copy and the amber accent are Bunsho's (see .claude/plans/obsidian-plugin-design.md).
+ */
 import { ItemView, type WorkspaceLeaf } from "obsidian";
 import type BunshoPlugin from "./main";
-import type { EngineIssue } from "./vendor/engine.types";
+import type { ChapterMeta } from "./review";
+import type { EngineIssue, EngineIssueCitation } from "./vendor/engine.types";
 
 export const VIEW_TYPE = "bunsho-continuity";
 
-const ROLE_LABEL: Record<string, string> = { prior_fact: "Earlier", current_conflict: "Here", supporting_context: "Context" };
+export const UPGRADE_URL = "https://bunsho.io/pricing";
+
+const STAGE_LABEL: Record<string, string> = {
+  read: "reading chapters", cast: "finding the cast", search: "searching the book", triage: "sorting leads",
+  judge: "weighing contradictions", timeline: "checking the timeline", names: "checking names", canon: "checking canon",
+  assemble: "writing up findings",
+};
+
+const fmt = (n: number): string => n.toLocaleString("en-US");
+const shortDate = (ms: number): string => new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 
 export class BunshoView extends ItemView {
   private showDismissed = false;
+  private readonly expanded = new Set<string>();
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: BunshoPlugin) { super(leaf); }
 
@@ -15,122 +32,204 @@ export class BunshoView extends ItemView {
   getDisplayText(): string { return "Bunsho"; }
   getIcon(): string { return "book-open-check"; }
 
-  async onOpen(): Promise<void> { this.render(); void this.plugin.refresh(); }
+  async onOpen(): Promise<void> { this.render(); await this.plugin.refresh(); }
 
   render(): void {
     const root = this.contentEl;
     root.empty();
     root.addClass("bunsho-panel");
-    const { account, scan, phase } = this.plugin;
 
-    if (!account.signedIn) {
-      const box = root.createDiv({ cls: "bunsho-box" });
-      box.createEl("h4", { text: "Check your story for contradictions" });
-      box.createEl("p", { text: "Sign in with the Google account you use for Bunsho. Your chapters are only sent when you start a check." });
-      if (account.problem) box.createEl("p", { text: account.problem, cls: "bunsho-problem" });
-      box.createEl("button", { text: "Sign in with Google", cls: "mod-cta" }).onclick = () => void this.plugin.signIn();
-      return; // Rule: nothing in the plugin works without a Bunsho sign-in (no layout help, no check, no findings).
-    }
+    if (!this.plugin.account.signedIn) { this.renderSignedOut(root); return; }
 
-    this.renderStructure(root);
-    if (scan.status === "ready") this.renderCheck(root);
-    if (phase.kind === "error") {
-      const box = root.createDiv({ cls: "bunsho-box bunsho-error" });
-      box.createEl("p", { text: phase.message });
-    }
-    this.renderFindings(root);
+    this.renderStatusRow(root);
+    const body = root.createDiv({ cls: "bunsho-body" });
+    if (this.renderAlert(body)) return;
+    if (this.plugin.scan.status !== "ready") { this.renderNoChapters(body); return; }
+    this.renderFindings(body);
   }
 
-  private renderStructure(root: HTMLElement): void {
-    const { scan } = this.plugin;
-    if (scan.status === "ready") {
-      const line = root.createDiv({ cls: "bunsho-summary" });
-      line.createSpan({ text: `${scan.chapters.length} ${scan.chapters.length === 1 ? "chapter" : "chapters"}` });
-      line.createSpan({ text: ` · about ${scan.words.toLocaleString("en-US")} words` });
-      if (scan.skipped.length > 0) line.createSpan({ text: ` · ${scan.skipped.length} empty ${scan.skipped.length === 1 ? "note" : "notes"} skipped`, cls: "bunsho-muted" });
-      return;
-    }
-    const folder = this.plugin.data.manuscriptFolder;
-    const box = root.createDiv({ cls: "bunsho-box" });
-    box.createEl("h4", { text: scan.status === "no_folder" ? `No “${folder}” folder yet` : `No chapters in “${folder}”` });
-    box.createEl("p", { text: "Bunsho reads your manuscript in one layout:" });
-    box.createEl("pre", { text: `${folder}/\n  01 The Arrival.md\n  02 The Letter.md\n  03 ...` });
-    const rules = box.createEl("ul");
-    rules.createEl("li", { text: "One note per chapter, directly inside the folder." });
-    rules.createEl("li", { text: "Chapters are read in name order, so number them: 01, 02, ... 10." });
-    rules.createEl("li", { text: "One paragraph per line." });
-    if (scan.status === "no_folder") {
-      box.createEl("button", { text: `Create “${folder}” folder` }).onclick = () => void this.plugin.createManuscriptFolder();
-    }
+  // Signed out: the whole panel is the sign-in (nothing in the plugin works without it).
+  private renderSignedOut(root: HTMLElement): void {
+    const box = root.createDiv({ cls: "bunsho-empty" });
+    box.createDiv({ cls: "bunsho-empty-title", text: "Check your story for contradictions" });
+    box.createEl("p", { cls: "bunsho-empty-body", text: "Sign in with the Google account you use for Bunsho. Your chapters are only sent when you start a check." });
+    if (this.plugin.account.problem) box.createEl("p", { cls: "bunsho-problem", text: this.plugin.account.problem });
+    box.createEl("button", { cls: "bunsho-fill", text: "Sign in with Google" }).onclick = () => void this.plugin.signIn();
   }
 
-  private renderCheck(root: HTMLElement): void {
-    const { phase, account } = this.plugin;
-    const box = root.createDiv({ cls: "bunsho-box" });
-    if (phase.kind === "preparing" || phase.kind === "confirming") {
-      box.createEl("p", { text: phase.kind === "preparing" ? "Reading your chapters and the current price..." : "Confirm the price to start the check.", cls: "bunsho-muted" });
-      return;
-    }
+  /** One line of machine fact, and the one priced action (or Cancel while a check runs). */
+  private renderStatusRow(root: HTMLElement): void {
+    const { scan, phase, account } = this.plugin;
+    const review = this.plugin.currentReview();
+    const row = root.createDiv({ cls: "bunsho-status" });
+    const fact = row.createSpan({ cls: "bunsho-fact bunsho-status-text" });
+    const action = row.createSpan({ cls: "bunsho-status-action" });
+
     if (phase.kind === "checking") {
-      const bar = box.createDiv({ cls: "bunsho-bar" });
-      bar.createDiv({ cls: "bunsho-bar-fill" }).style.width = `${Math.round(phase.share * 100)}%`;
-      box.createEl("p", { text: phase.waiting ? "Starting the check..." : `Checking... ${Math.round(phase.share * 100)}%`, cls: "bunsho-muted" });
-      box.createEl("p", { text: "Keep Obsidian open until it finishes.", cls: "bunsho-muted" });
-      box.createEl("button", { text: "Cancel" }).onclick = () => this.plugin.cancel();
+      fact.addClass("is-reading");
+      fact.setText(phase.waiting ? "starting the check…" : `reviewing ${Math.round(phase.share * 100)}% · ${STAGE_LABEL[phase.stage ?? ""] ?? "reading"}`);
+      this.link(action, "Cancel", () => this.plugin.cancel());
       return;
+    }
+    if (phase.kind === "preparing" || phase.kind === "confirming") {
+      fact.setText(phase.kind === "preparing" ? "reading your chapters…" : "confirm the price to start");
+      return;
+    }
+    if (scan.status !== "ready") { fact.setText("Nothing to check yet"); return; }
+
+    const parts = [`${scan.chapters.length} ${scan.chapters.length === 1 ? "chapter" : "chapters"}`, `${fmt(scan.words)} words`];
+    if (review) parts.push(scan.snapshotId === review.snapshotId ? `checked ${shortDate(review.checkedAt)}` : "edited since last check");
+    fact.setText(parts.join(" · "));
+
+    if (account.project === "blocked") return; // the alert card explains; no priced action on a project the plan does not cover
+    const price = this.plugin.price();
+    this.link(action, price === null ? "Check manuscript" : `Check manuscript · ~${fmt(price)} credits`, () => void this.plugin.check());
+  }
+
+  /** At most one alert card, as on desktop. Returns true when the alert replaces the rest of the panel. */
+  private renderAlert(body: HTMLElement): boolean {
+    const { phase, account, scan } = this.plugin;
+    if (account.project === "blocked") {
+      const card = this.alertCard(body, "One project on the free plan");
+      card.createEl("p", { text: `Your free project is “${account.registeredName ?? "your other manuscript"}”. Upgrade to check this manuscript too.` });
+      this.link(card.createDiv(), "See plans", () => window.open(UPGRADE_URL));
+      return true;
+    }
+    if (phase.kind === "error") {
+      const card = this.alertCard(body, phase.charged ? "The check stopped" : "The check did not run");
+      card.createEl("p", { text: phase.message });
+      return false;
     }
     const price = this.plugin.price();
-    const short = account.balance !== null && price !== null && account.balance < price;
-    const button = box.createEl("button", { text: "Check manuscript", cls: "mod-cta" });
-    button.disabled = !account.signedIn;
-    button.onclick = () => void this.plugin.check();
-    if (account.signedIn && price !== null) {
-      box.createEl("p", { text: `About ${price.toLocaleString("en-US")} credits${account.balance !== null ? ` · you have ${account.balance.toLocaleString("en-US")}` : ""}`, cls: "bunsho-muted" });
+    if (scan.status === "ready" && account.balance !== null && price !== null && account.balance < price) {
+      const card = this.alertCard(body, "Not enough credits");
+      card.createEl("p", { text: `This check costs about ${fmt(price)} credits and you have ${fmt(account.balance)}.` });
+      this.link(card.createDiv(), "Add credits", () => window.open(UPGRADE_URL));
+      return false;
     }
-    if (short) box.createEl("p", { text: "You do not have enough credits for this check. Add credits in Bunsho, then try again.", cls: "bunsho-problem" });
-    if (account.signedIn && account.problem) box.createEl("p", { text: account.problem, cls: "bunsho-problem" });
+    if (account.problem) {
+      const card = this.alertCard(body, "Bunsho is unreachable");
+      card.createEl("p", { text: account.problem });
+    }
+    return false;
   }
 
-  private renderFindings(root: HTMLElement): void {
-    const review = this.plugin.data.lastReview;
-    // Findings from another manuscript folder (the setting changed since) are not about this manuscript.
-    if (!review || review.chapters.some((c) => !this.plugin.inManuscript(c.pageId))) return;
-    const { scan } = this.plugin;
+  private renderNoChapters(body: HTMLElement): void {
+    const folder = this.plugin.data.manuscriptFolder;
+    const box = body.createDiv({ cls: "bunsho-empty" });
+    box.createDiv({ cls: "bunsho-empty-title", text: "Nothing to check yet" });
+    box.createEl("p", { cls: "bunsho-empty-body", text: this.plugin.scan.status === "no_folder"
+      ? `Bunsho reads your manuscript from a folder called “${folder}”, one note per chapter.`
+      : `Add your chapters to “${folder}”, one note per chapter.` });
+    box.createEl("pre", { cls: "bunsho-tree", text: `${folder}/\n  01 The Arrival.md\n  02 The Letter.md\n  03 …` });
+    const rules = box.createEl("ul", { cls: "bunsho-rules" });
+    rules.createEl("li", { text: "Chapters are read in name order, so number them: 01, 02, … 10." });
+    rules.createEl("li", { text: "One paragraph per line." });
+    if (this.plugin.scan.status === "no_folder") {
+      box.createEl("button", { cls: "bunsho-quiet", text: `Create “${folder}” folder` }).onclick = () => void this.plugin.createManuscriptFolder();
+    }
+  }
+
+  private renderFindings(body: HTMLElement): void {
+    const review = this.plugin.currentReview();
+    if (!review) {
+      const box = body.createDiv({ cls: "bunsho-empty" });
+      box.createDiv({ cls: "bunsho-empty-title", text: "Nothing has been checked yet" });
+      box.createEl("p", { cls: "bunsho-empty-body", text: "Bunsho reads every chapter and shows where your story contradicts itself, quoting both passages. You see the price before anything is spent." });
+      return;
+    }
     const dismissed = new Set(this.plugin.data.dismissed);
     const open = review.issues.filter((i) => !dismissed.has(i.issue_id));
-    const hidden = review.issues.length - open.length;
-    const edited = scan.status === "ready" && scan.snapshotId !== review.snapshotId;
+    const rank1 = open.filter((i) => i.severity === "error");
+    const lower = open.filter((i) => i.severity !== "error");
 
-    const head = root.createDiv({ cls: "bunsho-findings-head" });
-    head.createEl("h4", { text: review.issues.length === 0 ? "No contradictions found"
-      : open.length === 0 ? "No open findings" : `${open.length} ${open.length === 1 ? "finding" : "findings"}` });
-    head.createDiv({ cls: "bunsho-muted", text: `Checked ${new Date(review.checkedAt).toLocaleString()}${edited ? " · text edited since" : ""}` });
-    if (review.unreadPages.length > 0) {
-      root.createEl("p", { text: `${review.unreadPages.length} ${review.unreadPages.length === 1 ? "chapter" : "chapters"} could not be read and ${review.unreadPages.length === 1 ? "was" : "were"} not checked.`, cls: "bunsho-problem" });
+    if (open.length === 0) {
+      const box = body.createDiv({ cls: "bunsho-empty" });
+      box.createDiv({ cls: "bunsho-empty-title", text: review.issues.length === 0 ? "No contradictions found" : "No open findings" });
+      box.createDiv({ cls: "bunsho-fact", text: `${review.chapters.length - review.unreadPages.length}/${review.chapters.length} chapters checked` });
     }
-    for (const issue of open) this.renderIssue(root, issue, false);
-    if (hidden > 0) {
-      const toggle = root.createEl("button", { text: this.showDismissed ? `Hide ${hidden} dismissed` : `Show ${hidden} dismissed`, cls: "bunsho-link" });
-      toggle.onclick = () => { this.showDismissed = !this.showDismissed; this.render(); };
-      if (this.showDismissed) for (const issue of review.issues.filter((i) => dismissed.has(i.issue_id))) this.renderIssue(root, issue, true);
+    if (review.unreadPages.length > 0 && open.length > 0) {
+      body.createDiv({ cls: "bunsho-fact bunsho-note", text: `${review.unreadPages.length} of ${review.chapters.length} chapters could not be read and were not checked` });
+    }
+
+    const chapters = new Map(review.chapters.map((c) => [c.pageId, c]));
+    if (rank1.length > 0) {
+      this.groupHeader(body, "Open contradiction", rank1.length, true);
+      const list = body.createDiv({ cls: "bunsho-list" });
+      for (const issue of rank1) this.card(list, issue, chapters, true, false);
+    }
+    if (lower.length > 0) {
+      this.groupHeader(body, "Worth a look", lower.length, false);
+      const list = body.createDiv({ cls: "bunsho-list" });
+      for (const issue of lower) this.card(list, issue, chapters, false, false);
+    }
+
+    const hidden = review.issues.filter((i) => dismissed.has(i.issue_id));
+    if (hidden.length > 0) {
+      const footer = body.createDiv({ cls: "bunsho-footer" });
+      footer.createSpan({ text: `${hidden.length} marked not an error · ` });
+      this.link(footer, this.showDismissed ? "Hide" : "Show", () => { this.showDismissed = !this.showDismissed; this.render(); });
+      if (this.showDismissed) {
+        const list = body.createDiv({ cls: "bunsho-list" });
+        for (const issue of hidden) this.card(list, issue, chapters, false, true);
+      }
     }
   }
 
-  private renderIssue(root: HTMLElement, issue: EngineIssue, dismissed: boolean): void {
-    const review = this.plugin.data.lastReview!;
-    const titles = new Map(review.chapters.map((c) => [c.pageId, c.title]));
-    const card = root.createDiv({ cls: `bunsho-card${dismissed ? " is-dismissed" : ""}` });
-    card.createDiv({ cls: `bunsho-severity is-${issue.severity}` });
-    const body = card.createDiv({ cls: "bunsho-card-body" });
-    body.createEl("p", { text: issue.message, cls: "bunsho-message" });
-    for (const citation of issue.citations.filter((c) => c.evidence_role !== "supporting_context")) {
-      const quote = body.createDiv({ cls: "bunsho-quote" });
-      quote.createDiv({ cls: "bunsho-quote-label", text: `${ROLE_LABEL[citation.evidence_role] ?? "Passage"} · ${titles.get(citation.page_id) ?? citation.location_label}` });
-      quote.createEl("blockquote", { text: citation.quoted_text });
-      quote.createEl("button", { text: "Go to passage", cls: "bunsho-link" }).onclick = () => void this.plugin.jump(citation);
+  private groupHeader(body: HTMLElement, label: string, count: number, rank1: boolean): void {
+    const head = body.createDiv({ cls: `bunsho-group${rank1 ? " is-rank1" : ""}` });
+    head.createSpan({ cls: "bunsho-group-label", text: label });
+    head.createSpan({ cls: "bunsho-fact", text: String(count) });
+  }
+
+  private card(list: HTMLElement, issue: EngineIssue, chapters: Map<string, ChapterMeta>, rank1: boolean, dismissed: boolean): void {
+    const card = list.createDiv({ cls: `bunsho-card${rank1 ? " is-rank1" : ""}${dismissed ? " is-dismissed" : ""}` });
+    card.createSpan({ cls: "bunsho-severity", text: issue.severity === "error" ? "error" : issue.severity === "warning" ? "warning" : "note" });
+    card.createDiv({ cls: "bunsho-claim", text: issue.message });
+
+    const passages = issue.citations.filter((c) => c.evidence_role !== "supporting_context");
+    const open = rank1 || this.expanded.has(issue.issue_id);
+    if (open) {
+      for (const citation of passages) this.passage(card, citation, chapters);
     }
-    const actions = body.createDiv({ cls: "bunsho-actions" });
-    actions.createEl("button", { text: dismissed ? "Restore" : "Dismiss", cls: "bunsho-link" }).onclick = () => void this.plugin.dismiss(issue.issue_id, !dismissed);
+
+    const foot = card.createDiv({ cls: "bunsho-card-foot" });
+    const coords = foot.createSpan({ cls: "bunsho-fact bunsho-coords" });
+    if (!open) {
+      coords.setText(passages.map((c) => this.chapterLabel(c, chapters, false)).join(" · "));
+      coords.addClass("is-clickable");
+      coords.onclick = () => { this.expanded.add(issue.issue_id); this.render(); };
+    }
+    const actions = foot.createSpan({ cls: "bunsho-actions" });
+    const toggle = actions.createEl("button", { cls: "bunsho-text-action is-quiet", text: dismissed ? "Restore" : "Not an error" });
+    toggle.onclick = () => void this.plugin.dismiss(issue.issue_id, !dismissed);
+  }
+
+  /** One quoted passage, its coordinate under it; clicking either selects it in the note. */
+  private passage(card: HTMLElement, citation: EngineIssueCitation, chapters: Map<string, ChapterMeta>): void {
+    const block = card.createDiv({ cls: "bunsho-passage", attr: { role: "button", tabindex: "0", "aria-label": "Go to passage" } });
+    block.createDiv({ cls: "bunsho-quote", text: citation.quoted_text });
+    block.createDiv({ cls: "bunsho-fact bunsho-coords", text: this.chapterLabel(citation, chapters, true) });
+    const go = () => void this.plugin.jump(citation);
+    block.onclick = go;
+    block.onkeydown = (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); go(); } };
+  }
+
+  private chapterLabel(citation: EngineIssueCitation, chapters: Map<string, ChapterMeta>, withTitle: boolean): string {
+    const chapter = chapters.get(citation.page_id);
+    if (!chapter) return citation.location_label;
+    return withTitle ? `Ch ${chapter.order + 1} · ${chapter.title}` : `Ch ${chapter.order + 1}`;
+  }
+
+  private alertCard(body: HTMLElement, title: string): HTMLElement {
+    const card = body.createDiv({ cls: "bunsho-alert" });
+    card.createDiv({ cls: "bunsho-alert-title", text: title });
+    return card;
+  }
+
+  private link(parent: HTMLElement, text: string, onClick: () => void): HTMLButtonElement {
+    const button = parent.createEl("button", { cls: "bunsho-text-action", text });
+    button.onclick = onClick;
+    return button;
   }
 }
-

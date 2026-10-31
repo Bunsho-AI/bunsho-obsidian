@@ -41,8 +41,9 @@ export function findings(start, pages) {
   return issues;
 }
 
-export function startMockEngine({ port = 0, balance = 500, tamper = false, failWith = null, holdOpen = false } = {}) {
+export function startMockEngine({ port = 0, balance = 500, tamper = false, failWith = null, holdOpen = false, paid = false, registered = null } = {}) {
   const requests = [];
+  let registration = registered; // { workspaceId, name } | null: the account's one free project
   const server = http.createServer((req, res) => {
     requests.push({ url: req.url, headers: req.headers });
     const json = (body) => { res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify(body)); };
@@ -50,6 +51,20 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
       jevEndpoint: "mock", limits: { maxPageChars: 150000, maxBookChars: 3000000 },
       pricing: { creditsPerThousandChars: 12, minimumUnits: 3, rounding: "up_once_per_review", chars: "checked_text_with_spaces", canonCreditsPerThousandChars: 1, canonCreditsPerPin: 2 } });
     if (req.url === "/v1/credits") return json({ balance, plan: 0, extra: balance, total: balance });
+    if (req.url === "/v1/billing/subscription") return json({ active: paid, tier: paid ? "storyteller" : null, status: paid ? "active" : null, renewsAt: null, cancelAtPeriodEnd: false, pendingTier: null, pendingAppliesAt: null });
+    const wire = () => registration && { workspaceId: registration.workspaceId, name: registration.name ?? null, registeredAt: "2026-10-31T00:00:00.000Z", revision: 1 };
+    if (req.url === "/v1/projects/registration" && req.method === "GET") return json({ registration: wire() });
+    if (req.url === "/v1/projects/registration" && req.method === "POST") {
+      let raw = "";
+      req.on("data", (chunk) => { raw += chunk; });
+      req.on("end", () => {
+        const body = JSON.parse(raw || "{}");
+        const replaced = Boolean(registration && registration.workspaceId !== body.workspaceId);
+        registration = { workspaceId: body.workspaceId, name: body.name ?? null };
+        json({ registration: wire(), replaced, replaceCount: replaced ? 1 : 0 });
+      });
+      return;
+    }
     res.writeHead(404); res.end();
   });
   const wss = new WebSocketServer({ server, path: "/v1/pipeline/v3/review", perMessageDeflate: false });
@@ -63,6 +78,10 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
       if (message.type === "start") start = message.payload;
       if (message.type === "page") pages.set(message.payload.pageId, message.payload.text);
       if (!start || pages.size < start.pages.filter((p) => p.send === "whole").length) return;
+      if (!paid && registration && registration.workspaceId !== start.workspaceId) { // the engine's one-project gate
+        socket.send(frame("error", { code: "project_limit", message: `Your free plan covers one project, \u201c${registration.name ?? "your other project"}\u201d. Upgrade to check another manuscript. You were not charged.`, charged: false }));
+        return socket.close(1011);
+      }
       if (failWith) { socket.send(frame("error", { code: failWith, message: "The reading model is unavailable. You were not charged.", charged: false })); return socket.close(1011); }
       socket.send(frame("accepted", { reviewId: start.reviewId, pages: start.pages.length, units: 3, credits: 36 }));
       let step = 0;
@@ -80,11 +99,12 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
     });
   });
   return new Promise((resolve) => server.listen(port, "127.0.0.1", () => resolve({
-    port: server.address().port, requests, close: () => new Promise((done) => { wss.close(); server.closeAllConnections?.(); server.close(done); }),
+    port: server.address().port, requests, registration: () => registration, close: () => new Promise((done) => { wss.close(); server.closeAllConnections?.(); server.close(done); }),
   })));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const engine = await startMockEngine({ port: Number(process.argv[2] ?? 8799) });
+  const engine = await startMockEngine({ port: Number(process.argv[2] ?? 8799), paid: process.argv.includes("--paid"),
+    registered: process.argv.includes("--other-project") ? { workspaceId: "someone-elses-manuscript", name: "Nine Fathoms" } : null });
   console.log(`mock engine on http://127.0.0.1:${engine.port}`);
 }

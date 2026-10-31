@@ -42,6 +42,19 @@ export function makeTransport(options: ConnectionOptions): PipelineV3Transport {
   };
 }
 
+/** Authenticated JSON POST; resolves with the parsed answer, throws with `status` on a non-OK answer. */
+export async function postJson(options: ConnectionOptions, path: string, body: unknown): Promise<unknown> {
+  const response = await requestUrl({ url: `${options.baseUrl.replace(/\/+$/u, "")}${path}`, method: "POST", contentType: "application/json",
+    body: JSON.stringify(body), headers: await authHeaders(options), throw: false });
+  if (response.status < 200 || response.status >= 300) throw Object.assign(new Error(`Engine answered ${response.status}`), { status: response.status });
+  return response.json as unknown;
+}
+
+/** GET that resolves to null instead of throwing (optional reads such as the plan and the project registry). */
+export async function tryGetJson(transport: PipelineV3Transport, path: string): Promise<unknown> {
+  try { return await transport.getJson(path); } catch { return null; }
+}
+
 /** The account's spendable credits from GET /v1/credits (`total`), or null when the engine does not say. */
 export async function readBalance(transport: PipelineV3Transport): Promise<number | null> {
   const answer = await transport.getJson("/v1/credits");
