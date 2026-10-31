@@ -210,8 +210,9 @@ export default class BunshoPlugin extends Plugin {
     try {
       await Promise.all([this.refreshScan(), this.refreshAccount()]);
       const { scan, account } = this;
+      if (!account.signedIn) { new Notice(account.problem ?? "Sign in to Bunsho to check your manuscript."); await this.openPanel(); return this.idle(); }
       if (scan.status !== "ready") { new Notice("Bunsho: no chapters found. See the panel for the folder layout."); await this.openPanel(); return this.idle(); }
-      if (!account.signedIn || !account.health) {
+      if (!account.health) {
         if (account.problem) new Notice(account.problem);
         await this.openPanel();
         return this.idle();
@@ -333,6 +334,8 @@ class BunshoSettingTab extends PluginSettingTab {
         if (this.plugin.account.signedIn) await this.plugin.signOut(); else await this.plugin.signIn();
         this.display();
       }));
+    new Setting(containerEl).setName("Privacy").setDesc("Your chapter notes are sent to the Bunsho service, over an encrypted connection, only when you confirm a check. While you are signed in, the plugin also reads your credit balance and the current price. The plugin sends no analytics.");
+    if (!this.plugin.account.signedIn) return; // Rule: everything else needs a Bunsho sign-in.
     new Setting(containerEl).setName("Manuscript folder")
       .setDesc("One note per chapter, directly inside this folder. Chapters are read in name order (01, 02, ... 10), one paragraph per line.")
       .addText((t) => t.setPlaceholder(DEFAULT_MANUSCRIPT_FOLDER).setValue(this.plugin.data.manuscriptFolder).onChange(async (value) => {
@@ -340,7 +343,6 @@ class BunshoSettingTab extends PluginSettingTab {
         await this.plugin.save();
         this.plugin.scheduleScan();
       }));
-    new Setting(containerEl).setName("Privacy").setDesc("Your chapter notes are sent to the Bunsho service, over an encrypted connection, only when you confirm a check. While you are signed in, the plugin also reads your credit balance and the current price. The plugin sends no analytics.");
     new Setting(containerEl).setName("Engine address").setDesc("Leave this alone unless Bunsho support asks you to change it. It must be a secure (HTTPS) address.")
       .addText((t) => t.setValue(this.plugin.data.engineUrl).onChange(async (value) => {
         const next = value.trim() || AUTH_CONFIG.engineUrl;

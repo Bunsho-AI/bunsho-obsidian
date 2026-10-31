@@ -25,6 +25,8 @@ Manuscript/
 
 ## Using it
 
+The plugin does nothing until you sign in: the panel and settings show only the sign-in until then.
+
 1. Install and enable the plugin, then open **Bunsho** from the ribbon or the command palette.
 2. Sign in with Google.
 3. Press **Check manuscript** (or run it from the command palette). Bunsho shows the credit price and asks before anything is spent. A check takes a few minutes; keep Obsidian open while it runs.

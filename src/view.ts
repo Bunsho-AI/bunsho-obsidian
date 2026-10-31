@@ -29,6 +29,7 @@ export class BunshoView extends ItemView {
       box.createEl("p", { text: "Sign in with the Google account you use for Bunsho. Your chapters are only sent when you start a check." });
       if (account.problem) box.createEl("p", { text: account.problem, cls: "bunsho-problem" });
       box.createEl("button", { text: "Sign in with Google", cls: "mod-cta" }).onclick = () => void this.plugin.signIn();
+      return; // Rule: nothing in the plugin works without a Bunsho sign-in (no layout help, no check, no findings).
     }
 
     this.renderStructure(root);
