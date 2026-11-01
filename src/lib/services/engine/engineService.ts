@@ -55,6 +55,15 @@ export async function tryGetJson(transport: PipelineV3Transport, path: string): 
   try { return await transport.getJson(path); } catch { return null; }
 }
 
+/**
+ * Claims the account's one-time starter credits (POST /v1/credits/starter), as the desktop does at sign-in. The engine
+ * grants them once per account and answers repeat calls with nothing new, so this is safe to call every session.
+ * Resolves false instead of throwing: a failed claim is simply made again on the next refresh.
+ */
+export async function claimStarterCredits(connection: ConnectionOptions): Promise<boolean> {
+  try { await postJson(connection, "/v1/credits/starter", {}); return true; } catch { return false; }
+}
+
 /** The account's spendable credits from GET /v1/credits (`total`), or null when the engine does not say. */
 export async function readBalance(transport: PipelineV3Transport): Promise<number | null> {
   const answer = await transport.getJson("/v1/credits");

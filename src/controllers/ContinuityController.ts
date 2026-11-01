@@ -14,7 +14,7 @@ import { secretSessionStore } from "@/lib/obsidian/secretStore";
 import { readManuscriptNotes } from "@/lib/obsidian/vault";
 import { AUTH_CONFIG } from "@/lib/services/auth/authConfig";
 import { AuthError, TokenSource } from "@/lib/services/auth/authService";
-import { formPost, makeTransport, readBalance, type ConnectionOptions } from "@/lib/services/engine/engineService";
+import { claimStarterCredits, formPost, makeTransport, readBalance, type ConnectionOptions } from "@/lib/services/engine/engineService";
 import { readProjectState, registerProject } from "@/lib/services/project/projectService";
 import { runReview, type ReviewOutcome } from "@/lib/services/review/reviewService";
 import { SIGNED_OUT, type Account, type Phase, type PluginData, type Scan } from "@/types";
@@ -48,6 +48,7 @@ export class ContinuityController {
   private scanTimer: number | undefined;
   private scanSeq = 0;
   private accountSeq = 0;
+  private starterClaimed = false; // once per session; the engine itself grants the starter credits only once per account
 
   constructor(private readonly host: ControllerHost) {}
 
@@ -127,6 +128,8 @@ export class ContinuityController {
     let next: Account = { ...SIGNED_OUT, signedIn };
     if (signedIn) {
       try {
+        // Before the balance read, so a writer who has only ever used Obsidian starts with the starter credits.
+        if (!this.starterClaimed) this.starterClaimed = await claimStarterCredits(this.connection());
         const transport = this.transport();
         const [health, balance, project] = await Promise.all([
           new PipelineV3Client(transport).health(), readBalance(transport), readProjectState(transport, this.data.workspaceId),
@@ -161,6 +164,7 @@ export class ContinuityController {
 
   async signOut(): Promise<void> {
     this.accountSeq++;
+    this.starterClaimed = false;
     await this.tokens.signOut();
     this.data.lastReview = null;
     await this.save();

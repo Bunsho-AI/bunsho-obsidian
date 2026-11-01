@@ -41,7 +41,7 @@ export function findings(start, pages) {
   return issues;
 }
 
-export function startMockEngine({ port = 0, balance = 500, tamper = false, failWith = null, holdOpen = false, paid = false, registered = null } = {}) {
+export function startMockEngine({ port = 0, balance = 500, tamper = false, failWith = null, holdOpen = false, paid = false, registered = null, starter = 0 } = {}) {
   const requests = [];
   let registration = registered; // { workspaceId, name } | null: the account's one free project
   const server = http.createServer((req, res) => {
@@ -50,6 +50,10 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
     if (req.url === "/v1/pipeline/v3/health") return json({ enabled: true, protocol: PROTOCOL, policyId: POLICY_ID, readPolicyId: READ_POLICY_ID, model: "mock", jevModel: "mock",
       jevEndpoint: "mock", limits: { maxPageChars: 150000, maxBookChars: 3000000 },
       pricing: { creditsPerThousandChars: 12, minimumUnits: 3, rounding: "up_once_per_review", chars: "checked_text_with_spaces", canonCreditsPerThousandChars: 1, canonCreditsPerPin: 2 } });
+    if (req.url === "/v1/credits/starter" && req.method === "POST") { // granted once per account, as on the engine
+      if (starter > 0) { balance += starter; starter = 0; }
+      return json({ balance, plan: 0, extra: balance, total: balance });
+    }
     if (req.url === "/v1/credits") return json({ balance, plan: 0, extra: balance, total: balance });
     if (req.url === "/v1/billing/subscription") return json({ active: paid, tier: paid ? "storyteller" : null, status: paid ? "active" : null, renewsAt: null, cancelAtPeriodEnd: false, pendingTier: null, pendingAppliesAt: null });
     const wire = () => registration && { workspaceId: registration.workspaceId, name: registration.name ?? null, registeredAt: "2026-10-31T00:00:00.000Z", revision: 1 };

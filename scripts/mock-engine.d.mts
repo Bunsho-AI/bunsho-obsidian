@@ -1,6 +1,6 @@
 export const POLICY_ID: string;
 export const READ_POLICY_ID: string;
-export interface MockEngineOptions { port?: number; balance?: number; tamper?: boolean | "prior"; failWith?: string | null; holdOpen?: boolean; paid?: boolean; registered?: { workspaceId: string; name?: string | null } | null }
+export interface MockEngineOptions { port?: number; balance?: number; tamper?: boolean | "prior"; failWith?: string | null; holdOpen?: boolean; paid?: boolean; registered?: { workspaceId: string; name?: string | null } | null; starter?: number }
 export interface MockEngine {
   port: number;
   requests: Array<{ url?: string; headers: Record<string, string | string[] | undefined>; socket?: boolean }>;
