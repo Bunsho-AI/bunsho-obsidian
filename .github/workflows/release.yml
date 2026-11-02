@@ -21,6 +21,8 @@ jobs:
       - run: npm ci
       - name: Tag matches manifest version
         run: test "${GITHUB_REF_NAME}" = "$(node -p "require('./manifest.json').version")"
+      - name: Committed sign-in values are present
+        run: npm run check:release
       - run: npm run lint
       - run: npm test
       - run: npm run build

@@ -13,3 +13,10 @@ export const AUTH_CONFIG = {
   googleClientSecret: pick(process.env.BUNSHO_GOOGLE_CLIENT_SECRET ?? "", ""),
   engineUrl: pick(process.env.BUNSHO_ENGINE_URL ?? "", "https://engine.bunsho.io"),
 } as const;
+
+type SignInValues = Pick<typeof AUTH_CONFIG, "firebaseApiKey" | "googleClientId" | "googleClientSecret">;
+
+/** The values a build cannot sign in without; the release workflow refuses to publish while any is empty. */
+export function missingSignInValues(config: { [K in keyof SignInValues]: string }): (keyof SignInValues)[] {
+  return (["firebaseApiKey", "googleClientId", "googleClientSecret"] as const).filter((name) => !config[name]);
+}

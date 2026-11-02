@@ -60,7 +60,7 @@ npm run build       # typecheck + bundle main.js
 node scripts/mock-engine.mjs 8799   # a stand-in engine, no model credits
 ```
 
-Local sign-in settings are read at build time from `BUNSHO_FIREBASE_API_KEY`, `BUNSHO_GOOGLE_CLIENT_ID`, `BUNSHO_GOOGLE_CLIENT_SECRET` and `BUNSHO_ENGINE_URL` (see `src/authConfig.ts`).
+Local sign-in settings are read at build time from `BUNSHO_FIREBASE_API_KEY`, `BUNSHO_GOOGLE_CLIENT_ID`, `BUNSHO_GOOGLE_CLIENT_SECRET` and `BUNSHO_ENGINE_URL` (see `src/lib/services/auth/authConfig.ts`). A release uses only the committed values, and `npm run check:release` fails while any of them is empty.
 
 Releasing: bump `version` in `manifest.json` and `package.json`, add it to `versions.json`, then push a tag equal to the version (no leading `v`). The release workflow lints, tests, builds from source and attaches `main.js`, `manifest.json` and `styles.css` to a draft GitHub release.
 

@@ -14,7 +14,7 @@ const context = await esbuild.context({
   loader: { ".png": "dataurl" }, // a plugin ships only main.js, manifest.json and styles.css, so images travel inside main.js
   // ws loads these optionally inside try/catch; Obsidian provides obsidian, electron and Node itself.
   external: ["obsidian", "electron", "bufferutil", "utf-8-validate", ...builtinModules, ...builtinModules.map((m) => `node:${m}`)],
-  // Local-development overrides (see src/authConfig.ts). Unset variables become "" and the committed defaults apply.
+  // Local-development overrides (see src/lib/services/auth/authConfig.ts). Unset variables become "" and the committed defaults apply.
   define: Object.fromEntries(["BUNSHO_FIREBASE_API_KEY", "BUNSHO_GOOGLE_CLIENT_ID", "BUNSHO_GOOGLE_CLIENT_SECRET", "BUNSHO_ENGINE_URL"]
     .map((name) => [`process.env.${name}`, JSON.stringify(process.env[name] ?? "")])),
   sourcemap: production ? false : "inline",
