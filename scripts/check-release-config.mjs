@@ -7,7 +7,7 @@ const { outputFiles } = await esbuild.build({
   bundle: true,
   format: "esm",
   write: false,
-  define: Object.fromEntries(["BUNSHO_FIREBASE_API_KEY", "BUNSHO_GOOGLE_CLIENT_ID", "BUNSHO_GOOGLE_CLIENT_SECRET", "BUNSHO_ENGINE_URL"]
+  define: Object.fromEntries(["BUNSHO_FIREBASE_API_KEY", "BUNSHO_FIREBASE_AUTH_DOMAIN", "BUNSHO_FIREBASE_APP_ID", "BUNSHO_ENGINE_URL"]
     .map((name) => [`process.env.${name}`, '""'])),
 });
 const source = Buffer.from(outputFiles[0].text).toString("base64");

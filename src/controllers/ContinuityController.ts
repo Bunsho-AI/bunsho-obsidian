@@ -53,6 +53,7 @@ export class ContinuityController {
   constructor(private readonly host: ControllerHost) {}
 
   async load(): Promise<void> {
+    this.tokens = new TokenSource(formPost, secretSessionStore(this.host.app));
     const saved = (await this.host.loadData()) as Partial<PluginData> | null;
     this.data = {
       manuscriptFolder: DEFAULT_MANUSCRIPT_FOLDER, engineUrl: AUTH_CONFIG.engineUrl, devUid: "",
@@ -60,13 +61,13 @@ export class ContinuityController {
     };
     // A vault's data.json can be synced or copied from elsewhere: never send a token to an address that is not ours to trust.
     if (!acceptableEngineUrl(this.data.engineUrl)) this.data.engineUrl = AUTH_CONFIG.engineUrl;
-    this.tokens = new TokenSource(formPost, secretSessionStore(this.host.app));
     await this.save();
   }
 
   dispose(): void {
     window.clearTimeout(this.scanTimer);
     this.abort?.abort();
+    this.tokens.cancelSignIn();
   }
 
   async save(): Promise<void> { await this.host.saveData(this.data); }
@@ -154,9 +155,11 @@ export class ContinuityController {
 
   async signIn(): Promise<void> {
     try {
-      await this.tokens.signIn((url) => window.open(url));
+      // "_external" goes to the system browser even with Obsidian's Web Viewer on, whose tabs block Google's popup.
+      await this.tokens.signIn((url) => window.open(url, "_external"));
       new Notice("Signed in to Bunsho.");
     } catch (error) {
+      if (error instanceof AuthError && error.code === "superseded") return; // a newer sign-in, a sign-out or the plugin unloading took over
       new Notice(error instanceof AuthError ? error.message : "Sign-in failed.");
     }
     await this.refreshAccount();

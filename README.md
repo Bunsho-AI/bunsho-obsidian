@@ -45,7 +45,7 @@ Checking only ever runs when you press the button. Writing is never metered.
 
 - **Account required.** Checking needs a Bunsho account and credits.
 - **Payment.** A check is paid for with Bunsho credits. Credits are bought at bunsho.io, not inside the plugin.
-- **Network use.** When you confirm a check, the plugin sends the text of your chapter notes to the Bunsho service (`engine.bunsho.io`) over an encrypted connection to be checked, and receives the findings. While you are signed in it also reads your credit balance and the current price from the Bunsho service (when Obsidian starts, when the panel opens and after a check), and it contacts Google and Firebase to sign you in and keep you signed in. Requests carry a random install id generated on this machine and the plugin version; the install id protects the free starter allowance from abuse. Your notes are not sent at any other time.
+- **Network use.** When you confirm a check, the plugin sends the text of your chapter notes to the Bunsho service (`engine.bunsho.io`) over an encrypted connection to be checked, and receives the findings. While you are signed in it also reads your credit balance and the current price from the Bunsho service (when Obsidian starts, when the panel opens and after a check), and it contacts Google and Firebase to sign you in and keep you signed in. Sign-in opens a page served from your own computer in your browser; that page loads Firebase's sign-in code from Google. Requests carry a random install id generated on this machine and the plugin version; the install id protects the free starter allowance from abuse. Your notes are not sent at any other time.
 - **Telemetry.** The plugin sends no analytics or telemetry. The Bunsho service keeps the account and billing records needed to charge credits; see the privacy policy at https://bunsho.io/privacy.
 - **Stored on your machine.** Findings and dismissals live in the plugin's `data.json`. Your sign-in is kept in Obsidian's secret storage, never in `data.json`.
 - **Open source.** The plugin is a thin client under the MIT license. Detection runs in the Bunsho service.
@@ -60,7 +60,7 @@ npm run build       # typecheck + bundle main.js
 node scripts/mock-engine.mjs 8799   # a stand-in engine, no model credits
 ```
 
-Local sign-in settings are read at build time from `BUNSHO_FIREBASE_API_KEY`, `BUNSHO_GOOGLE_CLIENT_ID`, `BUNSHO_GOOGLE_CLIENT_SECRET` and `BUNSHO_ENGINE_URL` (see `src/lib/services/auth/authConfig.ts`). A release uses only the committed values, and `npm run check:release` fails while any of them is empty.
+Local sign-in settings are read at build time from `BUNSHO_FIREBASE_API_KEY`, `BUNSHO_FIREBASE_AUTH_DOMAIN`, `BUNSHO_FIREBASE_APP_ID` and `BUNSHO_ENGINE_URL`; `npm run build:stage` builds against stage (see `src/lib/services/auth/authConfig.ts`). A release uses only the committed values, and `npm run check:release` fails while any of them is empty.
 
 Releasing: bump `version` in `manifest.json` and `package.json`, add it to `versions.json`, then push a tag equal to the version (no leading `v`). The release workflow lints, tests, builds from source and attaches `main.js`, `manifest.json` and `styles.css` to a draft GitHub release.
 

@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "node esbuild.config.mjs watch",
     "build": "tsc --noEmit && node esbuild.config.mjs production",
+    "build:stage": "tsc --noEmit && node esbuild.config.mjs stage",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint .",

@@ -1,22 +1,20 @@
 /**
- * Build-time sign-in configuration. The Firebase web key is public by design (it ships in every Firebase web app and in the
- * desktop app's repo). The Google OAuth client is the plugin's own "Desktop app" client: Google documents the secret of an
- * installed-app client as non-confidential, which is what lets an open-source plugin carry it. Both are overridable at build
- * time for local development (BUNSHO_* env vars, see esbuild.config.mjs); the committed defaults are the production values.
+ * Build-time sign-in configuration. Firebase web config is public by design: it ships in every Firebase web app and in the
+ * desktop app's repo, and no Google client secret is involved. Values are overridable at build time (BUNSHO_* env vars or
+ * `npm run build:stage`, see esbuild.config.mjs); the committed defaults are the production values.
  */
 const pick = (override: string, fallback: string): string => (override ? override : fallback);
 
 export const AUTH_CONFIG = {
   firebaseApiKey: pick(process.env.BUNSHO_FIREBASE_API_KEY ?? "", "AIzaSyDyhmbEZX8nFG7ol8GNu3C9WurBMiqXZFE"),
-  /** Empty until the founder creates the plugin's OAuth client; sign-in then says it is not set up in this build. */
-  googleClientId: pick(process.env.BUNSHO_GOOGLE_CLIENT_ID ?? "", ""),
-  googleClientSecret: pick(process.env.BUNSHO_GOOGLE_CLIENT_SECRET ?? "", ""),
+  firebaseAuthDomain: pick(process.env.BUNSHO_FIREBASE_AUTH_DOMAIN ?? "", "bunsho-prod.firebaseapp.com"),
+  firebaseAppId: pick(process.env.BUNSHO_FIREBASE_APP_ID ?? "", "1:191491791774:web:341d0c7d70f108b9ca948f"),
   engineUrl: pick(process.env.BUNSHO_ENGINE_URL ?? "", "https://engine.bunsho.io"),
 } as const;
 
-type SignInValues = Pick<typeof AUTH_CONFIG, "firebaseApiKey" | "googleClientId" | "googleClientSecret">;
+type SignInValues = Pick<typeof AUTH_CONFIG, "firebaseApiKey" | "firebaseAuthDomain" | "firebaseAppId">;
 
 /** The values a build cannot sign in without; the release workflow refuses to publish while any is empty. */
 export function missingSignInValues(config: { [K in keyof SignInValues]: string }): (keyof SignInValues)[] {
-  return (["firebaseApiKey", "googleClientId", "googleClientSecret"] as const).filter((name) => !config[name]);
+  return (["firebaseApiKey", "firebaseAuthDomain", "firebaseAppId"] as const).filter((name) => !config[name]);
 }
