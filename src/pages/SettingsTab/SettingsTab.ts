@@ -21,7 +21,7 @@ export class SettingsTab extends PluginSettingTab {
     new Setting(containerEl).setName("Manuscript folder")
       .setDesc("One note per chapter, directly inside this folder. Chapters are read in name order (01, 02, ... 10), one paragraph per line.")
       .addText((t) => t.setPlaceholder(DEFAULT_MANUSCRIPT_FOLDER).setValue(c.data.manuscriptFolder).onChange((value) => void c.setManuscriptFolder(value)));
-    new Setting(containerEl).setName("Engine address").setDesc("Leave this alone unless Bunsho support asks you to change it. It must be a secure (HTTPS) address.")
+    new Setting(containerEl).setName("Engine address").setDesc("Leave this alone unless Bunsho support asks you to change it. Only Bunsho's own addresses are accepted.")
       .addText((t) => t.setValue(c.data.engineUrl).onChange((value) => void c.setEngineUrl(value)));
     if (isLocalEngine(c.data.engineUrl)) {
       new Setting(containerEl).setName("Developer user ID").setDesc("For a local development engine only.")
