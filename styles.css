@@ -158,3 +158,38 @@ button.bunsho-google:hover { background: #f8f9fa; box-shadow: 0 1px 2px rgba(60,
 button.bunsho-plan-move { flex: none; padding: 2px 4px; }
 button.bunsho-plan-move:disabled { opacity: 0.3; cursor: default; }
 .bunsho-plan-summary { margin-top: 10px; font-size: 13px; line-height: 1.5; }
+
+/* Panel tabs, and the World tab's filter row */
+.bunsho-tabs { display: flex; gap: 14px; margin-bottom: 12px; border-bottom: 1px solid var(--background-modifier-border); }
+.bunsho-tabs.is-filter { gap: 12px; border-bottom: none; margin-bottom: 8px; }
+button.bunsho-tab {
+  all: unset; cursor: pointer; padding: 2px 0 6px; margin-bottom: -1px; font-family: var(--font-interface); font-size: 12px; color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+}
+button.bunsho-tab.is-active { color: var(--text-normal); font-weight: 600; border-bottom-color: var(--bunsho-accent); }
+button.bunsho-tab:hover { color: var(--text-normal); }
+button.bunsho-tab:focus-visible { outline: 2px solid var(--bunsho-accent); outline-offset: 2px; }
+
+/* World */
+.bunsho-world-search { width: 100%; margin-bottom: 12px; font-size: 12px; }
+button.bunsho-world-head {
+  all: unset; display: flex; box-sizing: border-box; width: 100%; align-items: baseline; justify-content: space-between; gap: 8px; cursor: pointer;
+}
+button.bunsho-world-head:focus-visible { outline: 2px solid var(--bunsho-accent); outline-offset: 2px; border-radius: 2px; }
+.bunsho-world-name { font-size: 13px; font-weight: 500; color: var(--text-normal); overflow-wrap: anywhere; }
+.bunsho-world-aliases { margin-top: 2px; overflow-wrap: anywhere; }
+.bunsho-world-row { margin-top: 10px; }
+.bunsho-world-row.is-earlier { opacity: 0.65; }
+.bunsho-world-fact { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.bunsho-world-label { color: var(--text-muted); margin-right: 6px; }
+.bunsho-world-value { color: var(--text-normal); }
+.bunsho-world-row .bunsho-passage { margin-top: 3px; }
+.bunsho-world-more { margin-top: 8px; }
+.bunsho-world-pills { display: flex; flex-wrap: wrap; gap: 4px; }
+button.bunsho-world-pill {
+  all: unset; cursor: pointer; font-size: 11px; padding: 3px 9px; border-radius: 999px; color: var(--text-normal); overflow-wrap: anywhere;
+  background: var(--background-secondary); border: 1px solid var(--background-modifier-border);
+}
+button.bunsho-world-pill.is-more { color: var(--text-muted); }
+button.bunsho-world-pill:hover { border-color: var(--bunsho-accent); }
+button.bunsho-world-pill:focus-visible { outline: 2px solid var(--bunsho-accent); outline-offset: 2px; }

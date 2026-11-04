@@ -13,3 +13,4 @@ export interface MockEngine {
 }
 export function startMockEngine(options?: MockEngineOptions): Promise<MockEngine>;
 export function findings(start: unknown, pages: Map<string, string>): unknown[];
+export function readsOf(start: unknown, pages: Map<string, string>): unknown[];

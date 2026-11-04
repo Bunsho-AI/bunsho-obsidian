@@ -18,6 +18,7 @@ export default class BunshoPlugin extends Plugin {
     this.controller = new ContinuityController({
       app: this.app,
       version: this.manifest.version,
+      dir: this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`,
       loadData: () => this.loadData(),
       saveData: (data: PluginData) => this.saveData(data),
       openPanel: () => this.openPanel(),
