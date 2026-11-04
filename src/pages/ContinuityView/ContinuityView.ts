@@ -21,6 +21,7 @@ import { FindingsList, type FindingItem, type ResolvedItem } from "@/organisms/F
 import { ResolverPanel } from "@/organisms/ResolverPanel";
 import { WorldList } from "@/organisms/WorldList";
 import { PanelTabs } from "@/molecules/PanelTabs";
+import { PANEL_TABS, type PanelTabId } from "@/helpers/panelTabs";
 import type { WorldEntity, WorldFilter } from "@/helpers/world";
 import { SourcePrompt } from "@/organisms/SourcePrompt";
 import { SignInPanel } from "@/organisms/SignInPanel";
@@ -41,7 +42,7 @@ export class ContinuityView extends ItemView {
   private resolving: string | null = null;
   /** Where the keyboard goes after this render, when the element it was on has gone. */
   private focusNext: string | null = null;
-  private tab: "findings" | "world" = "findings";
+  private tab: PanelTabId = "continuity";
   private worldFilter: WorldFilter = "people";
   private worldSearch = "";
   private readonly worldOpen = new Set<string>();
@@ -101,7 +102,7 @@ export class ContinuityView extends ItemView {
     if (scan.status === "ready") {
       if (this.renderResolver(body)) return;
       this.renderSource(body, scan.source.kind === "folder" && scan.source.path === "/" ? "Whole vault" : scan.source.path);
-      PanelTabs(body, { active: this.tab, onSelect: (tab) => { this.tab = tab; this.resetScroll = true; this.render(); }, tabs: [{ id: "findings", label: "Findings" }, { id: "world", label: "World" }] });
+      PanelTabs(body, { active: this.tab, onSelect: (tab) => { this.tab = tab; this.resetScroll = true; this.render(); }, tabs: PANEL_TABS });
       if (this.tab === "world") this.renderWorld(body); else this.renderFindings(body);
       return;
     }

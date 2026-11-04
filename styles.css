@@ -210,6 +210,13 @@ button.bunsho-tab {
 }
 button.bunsho-tab.is-active { color: var(--text-normal); font-weight: 600; border-bottom-color: var(--bunsho-accent); }
 button.bunsho-tab:hover { color: var(--text-normal); }
+/* The main tabs, as the desktop's tab bar */
+.bunsho-tabs:not(.is-filter) { gap: 0; border-bottom-color: var(--bunsho-border); }
+.bunsho-tabs:not(.is-filter) button.bunsho-tab { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px 9px; font-family: var(--bunsho-desk-ui); font-weight: 500; color: var(--bunsho-text-3); }
+.bunsho-tabs:not(.is-filter) button.bunsho-tab:hover { color: var(--bunsho-text-1); }
+.bunsho-tabs:not(.is-filter) button.bunsho-tab.is-active { font-weight: 600; color: var(--bunsho-text-1); border-bottom-color: var(--bunsho-accent); }
+.bunsho-tab-icon { display: inline-flex; }
+.bunsho-tab-icon svg { width: 14px; height: 14px; }
 button.bunsho-tab:focus-visible { outline: 2px solid var(--bunsho-accent); outline-offset: 2px; }
 
 /* World */

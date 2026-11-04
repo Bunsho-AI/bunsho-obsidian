@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cardEvidence, nextOpenIssue, railEvidence, resolverContext, resolutionOf } from "@/helpers/findings";
+import { PANEL_TABS } from "@/helpers/panelTabs";
 import type { EngineIssue, EngineIssueCitation } from "@/lib/contract/engine.types";
 
 const cite = (page: string, role: string, quote: string): EngineIssueCitation =>
@@ -55,5 +56,14 @@ describe("what became of a finding", () => {
     expect(resolutionOf("a", new Set(), new Set(["a"]))).toBe("closed manual");
     expect(resolutionOf("a", new Set(["a"]), new Set(["a"]))).toBe("dismissed");
     expect(resolutionOf("a", new Set(), new Set())).toBeNull();
+  });
+});
+
+describe("the panel's tabs", () => {
+  it("keep the desktop's names, icons and order", () => {
+    expect(PANEL_TABS).toEqual([
+      { id: "world", label: "World", icon: "globe" },
+      { id: "continuity", label: "Continuity", icon: "check-circle-2" },
+    ]);
   });
 });
