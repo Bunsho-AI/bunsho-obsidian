@@ -69,3 +69,14 @@ describe("projectMarkdown", () => {
     expect(p.text).toBe("第一章\n彼女は黙って部屋を出た。");
   });
 });
+
+describe("headings", () => {
+  it("finds each heading's level and offset in the projected text", () => {
+    const projection = projectMarkdown("Intro.\n# One\nText.\n### Deep\nMore.");
+    expect(projection.headings.map((h) => [h.level, projection.text.slice(h.offset).split("\n")[0]])).toEqual([[1, "One"], [3, "Deep"]]);
+  });
+  it("reads no words, and a hash without a space is not a heading", () => {
+    expect(projectMarkdown("#tag\nText.").headings).toEqual([]);
+    expect(projectMarkdown("# 第一章\n本文。").headings).toHaveLength(1);
+  });
+});

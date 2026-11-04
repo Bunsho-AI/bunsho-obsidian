@@ -8,7 +8,7 @@ export function SignInPanel(parent: HTMLElement, { problem, onSignIn }: SignInPa
   const box = parent.createDiv({ cls: "bunsho-empty bunsho-signin" });
   BunshoWordmark(box, 28);
   box.createDiv({ cls: "bunsho-empty-title", text: "Check your story for contradictions" });
-  box.createEl("p", { cls: "bunsho-empty-body", text: "Sign in with the Google account you use for Bunsho. Your chapters are only sent when you start a check." });
+  box.createEl("p", { cls: "bunsho-empty-body", text: "Sign in with the Google account you use for Bunsho. Your writing is only sent when you confirm a check." });
   if (problem) box.createEl("p", { cls: "bunsho-problem", text: problem });
   GoogleSignInButton(box, { onClick: onSignIn });
   return box;

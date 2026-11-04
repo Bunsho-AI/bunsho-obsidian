@@ -8,8 +8,17 @@
 
 interface Segment { out: number; src: number; len: number }
 
+export interface ProjectedHeading {
+  /** Offset of the heading's text in `Projection.text`. */
+  offset: number;
+  /** 1 is the highest level. */
+  level: number;
+}
+
 export interface Projection {
   text: string;
+  /** The note's headings, by the markup only. */
+  headings: ProjectedHeading[];
   /** Offset in `text` -> offset of the same character in the note (for the start of a range). */
   toSource(offset: number): number;
   /** Offset in `text` -> offset in the note just after the last character of a range ending there. */
@@ -45,6 +54,7 @@ const TOKEN = new RegExp([
 
 export function projectMarkdown(raw: string): Projection {
   const segments: Segment[] = [];
+  const headings: ProjectedHeading[] = [];
   let out = "";
   const emit = (text: string, src: number) => {
     if (!text) return;
@@ -60,6 +70,8 @@ export function projectMarkdown(raw: string): Projection {
     emit(raw.slice(pos, match.index), pos);
     if (/^[ \t]*(?:-{3,}|\*{3,}|_{3,})[ \t]*$/u.test(whole)) {
       emit(whole, match.index);
+    } else if (whole.startsWith("#")) {
+      headings.push({ offset: out.length, level: whole.trimEnd().length });
     } else if (whole.startsWith("[[")) {
       const target = match[1] ?? "";
       const alias = match[2];
@@ -84,6 +96,7 @@ export function projectMarkdown(raw: string): Projection {
 
   return {
     text: out,
+    headings,
     toSource(offset) {
       for (let i = segments.length - 1; i >= 0; i--) {
         const s = segments[i];

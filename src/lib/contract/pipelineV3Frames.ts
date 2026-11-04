@@ -119,6 +119,7 @@ export function parsePipelineV3Health(value: unknown): PipelineV3Health {
         && pricing.canonCreditsPerThousandChars >= 0 ? pricing.canonCreditsPerThousandChars : null,
       canonCreditsPerPin: typeof pricing.canonCreditsPerPin === "number" && Number.isFinite(pricing.canonCreditsPerPin)
         && pricing.canonCreditsPerPin >= 0 ? pricing.canonCreditsPerPin : null },
+    readingParts: value.readingParts === true,
   };
 }
 

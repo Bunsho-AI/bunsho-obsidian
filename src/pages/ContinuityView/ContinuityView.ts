@@ -6,14 +6,18 @@ import { ItemView, type WorkspaceLeaf } from "obsidian";
 import { BUNSHO_ICON_ID } from "@/assets/logo";
 import { FillButton } from "@/atoms/FillButton";
 import type { ContinuityController } from "@/controllers/ContinuityController";
-import type { ChapterMeta } from "@/lib/services/review/reviewService";
+import { AiNotice } from "@/atoms/AiNotice";
+import { QuietButton } from "@/atoms/QuietButton";
+import { TextAction } from "@/atoms/TextAction";
+import { Fact } from "@/atoms/Fact";
+import type { PageMeta } from "@/helpers/sources";
 import type { EngineIssue, EngineIssueCitation } from "@/lib/contract/engine.types";
 import { AlertCard } from "@/molecules/AlertCard";
 import { BrandHeader } from "@/molecules/BrandHeader";
 import { EmptyState } from "@/molecules/EmptyState";
 import { StatusRow } from "@/molecules/StatusRow";
 import { FindingsList, type FindingItem } from "@/organisms/FindingsList";
-import { ManuscriptHelp } from "@/organisms/ManuscriptHelp";
+import { SourcePrompt } from "@/organisms/SourcePrompt";
 import { SignInPanel } from "@/organisms/SignInPanel";
 import { formatNumber, formatShortDate } from "@/utils/format";
 
@@ -21,7 +25,7 @@ export const VIEW_TYPE = "bunsho-continuity";
 export const UPGRADE_URL = "https://bunsho.io/#pricing";
 
 const STAGE_LABEL: Record<string, string> = {
-  read: "reading chapters", cast: "finding the cast", search: "searching the book", triage: "sorting leads",
+  read: "reading your story", cast: "finding the cast", search: "searching the book", triage: "sorting leads",
   judge: "weighing contradictions", timeline: "checking the timeline", names: "checking names", canon: "checking canon",
   assemble: "writing up findings",
 };
@@ -51,12 +55,32 @@ export class ContinuityView extends ItemView {
     BrandHeader(root);
     this.renderStatus(root);
     const body = root.createDiv({ cls: "bunsho-body" });
-    if (this.renderAlert(body)) return;
-    if (c.scan.status !== "ready") {
-      ManuscriptHelp(body, { folder: c.data.manuscriptFolder, folderExists: c.scan.status === "no_notes", onCreateFolder: () => void c.createManuscriptFolder() });
+    if (!this.renderAlert(body)) this.renderContent(body);
+    // Like the desktop's Continuity tab: one quiet line, always there, never a popup.
+    AiNotice(root);
+  }
+
+  private renderContent(body: HTMLElement): void {
+    const c = this.controller;
+    const { scan } = c;
+    if (scan.status === "ready") {
+      this.renderSource(body, scan.source.kind === "folder" && scan.source.path === "/" ? "Whole vault" : scan.source.path);
+      this.renderFindings(body);
       return;
     }
-    this.renderFindings(body);
+    SourcePrompt(body, { scan, onChoose: () => void c.chooseSource() });
+  }
+
+  /** What is being read, and the way to change it. */
+  private renderSource(body: HTMLElement, name: string): void {
+    const c = this.controller;
+    const row = body.createDiv({ cls: "bunsho-source" });
+    Fact(row, `Reading ${name}`, "bunsho-source-name");
+    const actions = row.createSpan({ cls: "bunsho-actions" });
+    const busy = c.phase.kind === "checking" || c.phase.kind === "preparing" || c.phase.kind === "confirming";
+    if (busy) return;
+    TextAction(actions, { label: "Reading plan", quiet: true, onClick: () => void c.editPlan() });
+    TextAction(actions, { label: "Change", quiet: true, onClick: () => void c.chooseSource() });
   }
 
   private renderStatus(root: HTMLElement): void {
@@ -68,13 +92,14 @@ export class ContinuityView extends ItemView {
       return;
     }
     if (phase.kind === "preparing" || phase.kind === "confirming") {
-      StatusRow(root, { fact: phase.kind === "preparing" ? "reading your chapters…" : "confirm the price to start" });
+      StatusRow(root, { fact: phase.kind === "preparing" ? "reading your notes…" : "waiting for you to confirm" });
       return;
     }
     if (scan.status !== "ready") { StatusRow(root, { fact: "Nothing to check yet" }); return; }
 
     const review = c.currentReview();
-    const parts = [`${scan.chapters.length} ${scan.chapters.length === 1 ? "chapter" : "chapters"}`, `${formatNumber(scan.words)} words`];
+    const sources = scan.items.filter((item) => item.included).length;
+    const parts = [`${formatNumber(sources)} ${c.noun(sources)}`, `${formatNumber(scan.words)} words`];
     if (review) parts.push(scan.snapshotId === review.snapshotId ? `checked ${formatShortDate(review.checkedAt)}` : "edited since last check");
     // One priced action: before the first check it is the empty state's button, after it this link.
     const showAction = review !== null && c.account.project !== "blocked";
@@ -86,9 +111,11 @@ export class ContinuityView extends ItemView {
     const c = this.controller;
     const { phase, account, scan } = c;
     if (account.project === "blocked") {
-      AlertCard(body, { title: "One project on the free plan",
-        body: `Your free project is “${account.registeredName ?? "your other manuscript"}”. Upgrade to check this manuscript too.`,
-        action: { label: "See plans", onClick: () => window.open(UPGRADE_URL) } });
+      const card = AlertCard(body, { title: "One project on the free plan",
+        body: `Your free project is \u201c${account.registeredName ?? "your other manuscript"}\u201d. You can switch it to this vault at any time, or upgrade to check both.` });
+      const actions = card.createDiv({ cls: "bunsho-alert-actions" });
+      FillButton(actions, { label: "Use this vault instead", onClick: () => void c.replaceFreeProject() });
+      QuietButton(actions, { label: "See plans", onClick: () => window.open(UPGRADE_URL) });
       return true;
     }
     if (phase.kind === "error") {
@@ -110,18 +137,18 @@ export class ContinuityView extends ItemView {
     const review = c.currentReview();
     if (!review) {
       const box = EmptyState(body, { title: "Nothing has been checked yet",
-        body: "Bunsho reads every chapter and shows where your story contradicts itself, quoting both passages. You see the price before anything is spent." });
+        body: "Bunsho reads your story and shows where it contradicts itself, quoting both passages. You see the order and the price before anything is spent." });
       if (c.phase.kind === "idle" || c.phase.kind === "error") FillButton(box, { label: this.checkLabel(), onClick: () => void c.check() });
       return;
     }
     const dismissed = new Set(c.data.dismissed);
-    const chapters = new Map(review.chapters.map((ch) => [ch.pageId, ch]));
+    const pages = new Map(review.pages.map((page) => [page.pageId, page]));
     const toItem = (issue: EngineIssue): FindingItem => ({
       id: issue.issue_id,
       claim: issue.message,
       severity: issue.severity,
       passages: issue.citations.filter((ct) => ct.evidence_role !== "supporting_context").map((ct) => ({
-        quote: ct.quoted_text, coordinate: this.coordinate(ct, chapters, true), shortCoordinate: this.coordinate(ct, chapters, false),
+        quote: ct.quoted_text, coordinate: this.coordinate(ct, pages, true), shortCoordinate: this.coordinate(ct, pages, false),
         onGo: () => void c.jump(ct),
       })),
       expanded: this.expanded.has(issue.issue_id),
@@ -132,8 +159,8 @@ export class ContinuityView extends ItemView {
       open: review.issues.filter((i) => !dismissed.has(i.issue_id)).map(toItem),
       dismissed: review.issues.filter((i) => dismissed.has(i.issue_id)).map(toItem),
       anyFindings: review.issues.length > 0,
-      chaptersChecked: review.chapters.length - review.unreadPages.length,
-      chaptersTotal: review.chapters.length,
+      coverage: { read: review.coverage.sources.length - review.coverage.unreadSources.length, total: review.coverage.sources.length, excluded: review.coverage.excluded,
+        noun: c.noun(review.coverage.sources.length), unreadLabels: review.coverage.sources.filter((source) => review.coverage.unreadSources.includes(source.id)).map((source) => source.label) },
       showDismissed: this.showDismissed,
       onToggleShowDismissed: () => { this.showDismissed = !this.showDismissed; this.render(); },
     });
@@ -144,9 +171,10 @@ export class ContinuityView extends ItemView {
     return price === null ? "Check manuscript" : `Check manuscript · ~${formatNumber(price)} credits`;
   }
 
-  private coordinate(citation: EngineIssueCitation, chapters: Map<string, ChapterMeta>, withTitle: boolean): string {
-    const chapter = chapters.get(citation.page_id);
-    if (!chapter) return citation.location_label;
-    return withTitle ? `Ch ${chapter.order + 1} · ${chapter.title}` : `Ch ${chapter.order + 1}`;
+  /** Where a passage is, in the writer's terms: the note or section. Reading units are never shown. */
+  private coordinate(citation: EngineIssueCitation, pages: Map<string, PageMeta>, full: boolean): string {
+    const page = pages.get(citation.page_id);
+    if (!page) return citation.location_label;
+    return full ? page.label : page.label.split(" / ").pop() ?? page.label;
   }
 }

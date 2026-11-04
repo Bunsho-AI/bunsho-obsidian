@@ -41,15 +41,16 @@ export function findings(start, pages) {
   return issues;
 }
 
-export function startMockEngine({ port = 0, balance = 500, tamper = false, failWith = null, holdOpen = false, paid = false, registered = null, starter = 0 } = {}) {
+export function startMockEngine({ port = 0, balance = 500, tamper = false, failWith = null, holdOpen = false, paid = false, registered = null, starter = 0, readingParts = true } = {}) {
   const requests = [];
+  const starts = [];
   let registration = registered; // { workspaceId, name } | null: the account's one free project
   const server = http.createServer((req, res) => {
     requests.push({ url: req.url, headers: req.headers });
     const json = (body) => { res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify(body)); };
     if (req.url === "/v1/pipeline/v3/health") return json({ enabled: true, protocol: PROTOCOL, policyId: POLICY_ID, readPolicyId: READ_POLICY_ID, model: "mock", jevModel: "mock",
       jevEndpoint: "mock", limits: { maxPageChars: 150000, maxBookChars: 3000000 },
-      pricing: { creditsPerThousandChars: 12, minimumUnits: 3, rounding: "up_once_per_review", chars: "checked_text_with_spaces", canonCreditsPerThousandChars: 1, canonCreditsPerPin: 2 } });
+      pricing: { creditsPerThousandChars: 12, minimumUnits: 3, rounding: "up_once_per_review", chars: "checked_text_with_spaces", canonCreditsPerThousandChars: 1, canonCreditsPerPin: 2 }, ...(readingParts ? { readingParts: true } : {}) });
     if (req.url === "/v1/credits/starter" && req.method === "POST") { // granted once per account, as on the engine
       if (starter > 0) { balance += starter; starter = 0; }
       return json({ balance, plan: 0, extra: balance, total: balance });
@@ -79,9 +80,13 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
     socket.on("message", (data) => {
       const message = JSON.parse(data.toString());
       if (message.type === "cancel") return socket.close(1000);
-      if (message.type === "start") start = message.payload;
+      if (message.type === "start") { start = message.payload; starts.push(start); }
       if (message.type === "page") pages.set(message.payload.pageId, message.payload.text);
       if (!start || pages.size < start.pages.filter((p) => p.send === "whole").length) return;
+      if (!readingParts && start.pages.some((p) => p.part)) { // the engine's start schema is strict
+        socket.send(frame("error", { code: "invalid_request", message: "That request was not valid. You were not charged.", charged: false }));
+        return;
+      }
       if (!paid && registration && registration.workspaceId !== start.workspaceId) { // the engine's one-project gate
         socket.send(frame("error", { code: "project_limit", message: `Your free plan covers one project, \u201c${registration.name ?? "your other project"}\u201d. Upgrade to check another manuscript. You were not charged.`, charged: false }));
         return socket.close(1011);
@@ -103,7 +108,7 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
     });
   });
   return new Promise((resolve) => server.listen(port, "127.0.0.1", () => resolve({
-    port: server.address().port, requests, registration: () => registration, close: () => new Promise((done) => { wss.close(); server.closeAllConnections?.(); server.close(done); }),
+    port: server.address().port, requests, starts, registration: () => registration, close: () => new Promise((done) => { wss.close(); server.closeAllConnections?.(); server.close(done); }),
   })));
 }
 

@@ -1,7 +1,6 @@
 /** Plugin settings. Signed out, only the account and privacy sections show (nothing works without a sign-in). */
 import { PluginSettingTab, Setting, type App, type Plugin } from "obsidian";
 import type { ContinuityController } from "@/controllers/ContinuityController";
-import { DEFAULT_MANUSCRIPT_FOLDER } from "@/helpers/chapters";
 import { isLocalEngine } from "@/utils/url";
 
 export class SettingsTab extends PluginSettingTab {
@@ -16,11 +15,11 @@ export class SettingsTab extends PluginSettingTab {
         if (c.account.signedIn) await c.signOut(); else await c.signIn();
         this.display();
       }));
-    new Setting(containerEl).setName("Privacy").setDesc("Your chapter notes are sent to the Bunsho service, over an encrypted connection, only when you confirm a check. While you are signed in, the plugin also reads your credit balance and the current price. The plugin sends no analytics.");
+    new Setting(containerEl).setName("Privacy").setDesc("The notes you choose are sent to the Bunsho service, over an encrypted connection, only when you confirm a check. While you are signed in, the plugin also reads your credit balance and the current price. The plugin sends no analytics.");
     if (!c.account.signedIn) return;
-    new Setting(containerEl).setName("Manuscript folder")
-      .setDesc("One note per chapter, directly inside this folder. Chapters are read in name order (01, 02, ... 10), one paragraph per line.")
-      .addText((t) => t.setPlaceholder(DEFAULT_MANUSCRIPT_FOLDER).setValue(c.data.manuscriptFolder).onChange((value) => void c.setManuscriptFolder(value)));
+    new Setting(containerEl).setName("What Bunsho reads")
+      .setDesc(c.data.source ? `\u201c${c.data.source.path === "/" ? "Whole vault" : c.data.source.path}\u201d. Any layout works: you confirm the order before a check.` : "Nothing chosen yet. Pick a folder or a note, in any layout.")
+      .addButton((b) => b.setButtonText(c.data.source ? "Change" : "Choose").onClick(async () => { await c.chooseSource(); this.display(); }));
     new Setting(containerEl).setName("Engine address").setDesc("Leave this alone unless Bunsho support asks you to change it. Only Bunsho's own addresses are accepted.")
       .addText((t) => t.setValue(c.data.engineUrl).onChange((value) => void c.setEngineUrl(value)));
     if (isLocalEngine(c.data.engineUrl)) {

@@ -2,12 +2,13 @@
 import type { Projection } from "@/utils/markdown";
 import type { EngineIssueCitation } from "@/lib/contract/engine.types";
 
-export function locateQuote(citation: Pick<EngineIssueCitation, "quoted_text" | "source_ref">, projection: Projection, rev: string | null): { from: number; to: number } | null {
+/** `pageOffset`: where the cited page starts in the note's projected text. Citation offsets are into the page. */
+export function locateQuote(citation: Pick<EngineIssueCitation, "quoted_text" | "source_ref">, projection: Projection, pageOffset: number): { from: number; to: number } | null {
   const quote = citation.quoted_text;
   if (!quote) return null;
   const ref = citation.source_ref;
   let start = -1;
-  if (ref && rev !== null && rev === ref.rev && projection.text.slice(ref.start, ref.end) === quote) start = ref.start;
+  if (ref && projection.text.slice(pageOffset + ref.start, pageOffset + ref.end) === quote) start = pageOffset + ref.start;
   else {
     const found = projection.text.indexOf(quote);
     // Ambiguous repeats are not guessed at: the quote must be the only occurrence.

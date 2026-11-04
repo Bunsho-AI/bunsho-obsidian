@@ -1,27 +1,36 @@
-/** One whole-manuscript review: build the request from chapters, run it, and keep only findings grounded in the text sent. */
+/** One whole-manuscript review: build the request from reading units, run it, and keep only findings grounded in the text sent. */
 import { randomUUID } from "node:crypto";
-import type { Chapter } from "@/helpers/chapters";
-import { snapshotId } from "@/helpers/chapters";
+import { buildUnits, snapshotId, type PageMeta, type PlannedItem, type SourceChoice } from "@/helpers/sources";
 import { PipelineV3Client, type PipelineV3ReviewCallbacks } from "@/lib/contract/pipelineV3Client";
 import type { EngineIssue } from "@/lib/contract/engine.types";
 import { groundIssues, type GroundingPage } from "@/lib/contract/grounding";
 import type { PipelineV3Health, PipelineV3Result } from "@/lib/contract/pipelineV3.types";
 
-export interface ChapterMeta { pageId: string; title: string; order: number; rev: string }
+/** What this review read, in the writer's terms: never reading units. */
+export interface ReviewCoverage {
+  /** Plan items sent, in order. */
+  sources: { id: string; label: string }[];
+  /** Plan items the engine could not fully read. */
+  unreadSources: string[];
+  /** Plan items the writer left out. */
+  excluded: number;
+}
 
 export interface ReviewOutcome {
   checkedAt: number;
   snapshotId: string;
-  chapters: ChapterMeta[];
+  /** What was picked when this ran: the panel shows a review only for its own source. */
+  source: SourceChoice;
+  pages: PageMeta[];
   issues: EngineIssue[];
-  /** Chapters the engine could not read: not proven checked. */
-  unreadPages: string[];
+  coverage: ReviewCoverage;
   refundedCredits: number;
   droppedFindings: number;
 }
 
 export interface RunReviewInput {
-  chapters: readonly Chapter[];
+  items: readonly PlannedItem[];
+  source: SourceChoice;
   health: PipelineV3Health;
   workspaceId: string;
   client: Pick<PipelineV3Client, "review">;
@@ -32,8 +41,9 @@ export interface RunReviewInput {
 }
 
 export async function runReview(input: RunReviewInput): Promise<ReviewOutcome> {
-  const { chapters, health } = input;
-  const snapshot = snapshotId(chapters);
+  const { items, health } = input;
+  const { units, pages } = buildUnits(items);
+  const snapshot = snapshotId(units);
   const start = {
     reviewId: randomUUID(),
     workspaceId: input.workspaceId,
@@ -41,24 +51,31 @@ export async function runReview(input: RunReviewInput): Promise<ReviewOutcome> {
     scope: "full" as const,
     policyId: health.policyId,
     readPolicyId: health.readPolicyId,
-    pages: chapters.map((c) => ({ pageId: c.pageId, order: c.order, rev: c.rev, send: "whole" as const })),
+    pages: units.map((u) => ({ pageId: u.pageId, order: u.order, rev: u.rev, send: "whole" as const, ...(u.part ? { part: u.part } : {}) })),
     cachedReads: [],
     pins: [],
     focusNames: [],
     ...(input.maxCredits === undefined ? {} : { maxCredits: input.maxCredits }),
   };
   const result: PipelineV3Result = await input.client.review(
-    { start, pages: chapters.map((c) => ({ pageId: c.pageId, text: c.text })), passages: [] },
+    { start, pages: units.map((u) => ({ pageId: u.pageId, text: u.text })), passages: [] },
     input.callbacks, input.signal);
 
-  const pages = new Map<string, GroundingPage>(chapters.map((c) => [c.pageId, { pageId: c.pageId, pageOrder: c.order, rev: c.rev, text: c.text }]));
-  const grounded = groundIssues(result.issues, snapshot, pages);
+  const grounding = new Map<string, GroundingPage>(units.map((u) => [u.pageId, { pageId: u.pageId, pageOrder: u.order, rev: u.rev, text: u.text }]));
+  const grounded = groundIssues(result.issues, snapshot, grounding);
+  const unread = new Set(result.unreadPages ?? []);
+  const included = items.filter((item) => item.included);
   return {
     checkedAt: Date.now(),
     snapshotId: snapshot,
-    chapters: chapters.map(({ pageId, title, order, rev }) => ({ pageId, title, order, rev })),
+    source: input.source,
+    pages,
     issues: grounded.issues,
-    unreadPages: result.unreadPages ?? [],
+    coverage: {
+      sources: included.map(({ id, label }) => ({ id, label })),
+      unreadSources: [...new Set(pages.filter((p) => unread.has(p.pageId)).map((p) => p.sourceId))],
+      excluded: items.length - included.length,
+    },
     refundedCredits: result.refundedCredits ?? 0,
     droppedFindings: grounded.droppedIssues,
   };
