@@ -4,3 +4,8 @@ export async function requestUrl({ url, method, body, headers }: { url: string; 
   const text = await response.text();
   return { status: response.status, json: text ? (JSON.parse(text) as unknown) : null };
 }
+export class Notice { constructor(readonly message: string) {} }
+export class MarkdownView {}
+export class TFile {}
+export class TFolder {}
+export const getAllTags = (): string[] => [];

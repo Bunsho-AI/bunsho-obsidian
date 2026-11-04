@@ -3,7 +3,8 @@
  * check lifecycle, findings. Pages read its state and call its actions; components below pages receive plain props.
  */
 import { Notice, type App } from "obsidian";
-import { applyPlan, buildItems, buildUnits, moveNoteIds, roughWords, snapshotId, sourceContains, sourceProblems, type PlannedItem, type SavedPlan, type SourceChoice } from "@/helpers/sources";
+import { applyPlan, buildItems, buildUnits, dropNoteIds, holdsNoteId, moveNoteIds, planQuote, snapshotId, sourceContains, type PlannedItem, type SavedPlan, type SourceChoice } from "@/helpers/sources";
+import { countWords } from "@/lib/contract/countWords";
 import { ProgressTracker } from "@/helpers/progress";
 import type { EngineIssueCitation } from "@/lib/contract/engine.types";
 import { PipelineV3Client, PipelineV3Error } from "@/lib/contract/pipelineV3Client";
@@ -58,6 +59,8 @@ export interface ControllerHost {
   changed(): void;
 }
 
+type ReadyScan = Extract<Scan, { status: "ready" }>;
+
 export class ContinuityController {
   data!: PluginData;
   scan: Scan = { status: "no_source" };
@@ -69,6 +72,9 @@ export class ContinuityController {
   private scanSeq = 0;
   private accountSeq = 0;
   private idsChanged = false;
+  private saving: Promise<void> = Promise.resolve();
+  /** The source of the review in flight, which can take minutes: a rename while it runs must reach its result. */
+  private reviewing: SourceChoice | null = null;
   private starterClaimed = false; // once per session; the engine itself grants the starter credits only once per account
 
   constructor(private readonly host: ControllerHost) {}
@@ -82,7 +88,8 @@ export class ContinuityController {
       installId: crypto.randomUUID(), workspaceId: crypto.randomUUID(), dismissed: [], lastReview: null, ...rest,
     };
     // Before the reading plan: the folder setting becomes the picked source, and a review from then cannot be mapped back.
-    if (!this.data.source && typeof manuscriptFolder === "string" && manuscriptFolder) this.data.source = { kind: "folder", path: manuscriptFolder };
+    const folder = typeof manuscriptFolder === "string" ? manuscriptFolder.trim().replace(/^\/+|\/+$/gu, "") : "";
+    if (!this.data.source && folder) this.data.source = { kind: "folder", path: folder };
     if (this.data.lastReview && !Array.isArray(this.data.lastReview.pages)) this.data.lastReview = null;
     // A vault's data.json can be synced or copied from elsewhere: never send a token to an address that is not ours to trust.
     if (!acceptableEngineUrl(this.data.engineUrl)) this.data.engineUrl = AUTH_CONFIG.engineUrl;
@@ -95,7 +102,15 @@ export class ContinuityController {
     this.tokens.cancelSignIn();
   }
 
-  async save(): Promise<void> { await this.host.saveData(this.data); }
+  /** One write at a time, each with the latest data, so an older snapshot can never finish last and undo a newer one. */
+  save(): Promise<void> {
+    const write = this.saving.catch(() => undefined).then(() => this.host.saveData(this.data));
+    this.saving = write;
+    return write;
+  }
+
+  /** A check or a dialog is in progress. */
+  private get busy(): boolean { return this.phase.kind !== "idle" && this.phase.kind !== "error"; }
 
   private get app(): App { return this.host.app; }
   private get devUid(): string | undefined { return isLocalEngine(this.data.engineUrl) && this.data.devUid ? this.data.devUid : undefined; }
@@ -125,9 +140,20 @@ export class ContinuityController {
   async moved(path: string, oldPath: string): Promise<void> {
     const follow = <T extends SourceChoice>(choice: T): T => (choice.path === oldPath ? { ...choice, path }
       : choice.path.startsWith(`${oldPath}/`) ? { ...choice, path: `${path}${choice.path.slice(oldPath.length)}` } : choice);
+    const review = this.data.lastReview;
+    const changes = holdsNoteId(this.data.noteIds, oldPath) || [this.data.source, this.reviewing, review?.source].some((choice) => choice && follow(choice) !== choice);
+    if (!changes) return;
     this.data.noteIds = moveNoteIds(this.data.noteIds, oldPath, path);
     if (this.data.source) this.data.source = follow(this.data.source);
-    if (this.data.lastReview) this.data.lastReview = { ...this.data.lastReview, source: follow(this.data.lastReview.source) };
+    if (this.reviewing) this.reviewing = follow(this.reviewing);
+    if (review) this.data.lastReview = { ...review, source: follow(review.source) };
+    await this.save();
+  }
+
+  /** A note or folder is gone: a new note at that path is a new note, and the plan will show it. */
+  async deleted(path: string): Promise<void> {
+    if (!holdsNoteId(this.data.noteIds, path)) return;
+    this.data.noteIds = dropNoteIds(this.data.noteIds, path);
     await this.save();
   }
 
@@ -156,15 +182,23 @@ export class ContinuityController {
     this.scanTimer = window.setTimeout(() => void this.refreshScan(), SCAN_DEBOUNCE_MS);
   }
 
+  /** Keeps the panel current. A note that cannot be read leaves the last scan up; a check reports it through freshScan. */
   async refreshScan(): Promise<void> {
+    try { await this.freshScan(); } catch (error) { console.warn("[Bunsho] could not read the notes", error); }
+  }
+
+  /** Reads the source now and returns this read's own result, even when a newer scan has since taken over the panel. */
+  private async freshScan(): Promise<Scan> {
     window.clearTimeout(this.scanTimer);
     const seq = ++this.scanSeq;
     const { source } = this.data;
     const next = source ? await this.scanSource(source) : { status: "no_source" as const };
-    if (seq !== this.scanSeq) return; // a newer scan started while this one read notes
-    this.scan = next;
+    if (seq === this.scanSeq) { // a newer scan started while this one read notes: the panel waits for that one
+      this.scan = next;
+      this.host.changed();
+    }
     if (this.idsChanged) { this.idsChanged = false; await this.save(); }
-    this.host.changed();
+    return next;
   }
 
   private async scanSource(source: SourceChoice): Promise<Scan> {
@@ -176,8 +210,8 @@ export class ContinuityController {
     const { units, pages } = buildUnits(plan.items);
     return {
       status: "ready", source, items: plan.items, needsConfirming: plan.needsConfirming, pages, skipped,
-      hasParts: units.some((u) => u.part), problems: sourceProblems(units), snapshotId: snapshotId(units),
-      chars: units.reduce((n, u) => n + u.text.length, 0), words: units.reduce((n, u) => n + roughWords(u.text), 0),
+      snapshotId: snapshotId(units),
+      chars: units.reduce((n, u) => n + u.text.length, 0), words: units.reduce((n, u) => n + countWords(u.text), 0),
     };
   }
 
@@ -205,10 +239,9 @@ export class ContinuityController {
   }
 
   /** Credits a check of the current manuscript costs, or null when unknown. */
-  price(): number | null { return this.scan.status === "ready" ? this.priceFor(this.scan.chars) : null; }
+  price(): number | null { return this.scan.status === "ready" ? this.priceFor(this.scan.chars, this.account.health) : null; }
 
-  private priceFor(chars: number): number | null {
-    const { health } = this.account;
+  private priceFor(chars: number, health: PipelineV3Health | null): number | null {
     if (!health) return null;
     return pipelineV3ReviewCredits({ op: PIPELINE_V3_PRICE_OP, creditsPerThousandChars: health.pricing.creditsPerThousandChars, minimumUnits: health.pricing.minimumUnits }, chars);
   }
@@ -238,101 +271,110 @@ export class ContinuityController {
    * Check what the writer picked. Reads the notes and the engine's price fresh, shows the reading plan when it has not been
    * confirmed or has changed, shows the price and asks before anything is spent (from the panel and from the command palette
    * alike), and runs at most one review at a time.
+   *
+   * The writer's confirmation is of what they were shown, so that is what is sent, at that price. The notes can change while
+   * a dialog is open (Obsidian autosaves as they type): those edits wait for the next check.
    */
   async check(): Promise<void> {
-    if (this.phase.kind !== "idle" && this.phase.kind !== "error") return;
+    if (this.busy) return;
     this.setPhase({ kind: "preparing" });
     try {
-      await Promise.all([this.refreshScan(), this.refreshAccount()]);
+      const [scan] = await Promise.all([this.freshScan(), this.refreshAccount()]);
       const { account } = this;
+      const { health } = account;
       if (!account.signedIn) { new Notice(account.problem ?? "Sign in to Bunsho to check your manuscript."); await this.host.openPanel(); return this.idle(); }
-      if (this.scan.status !== "ready") { new Notice("Bunsho: choose what to read first. See the panel."); await this.host.openPanel(); return this.idle(); }
-      if (!account.health) {
+      if (scan.status !== "ready") { new Notice("Bunsho: choose what to read first. See the panel."); await this.host.openPanel(); return this.idle(); }
+      if (!health) {
         if (account.problem) new Notice(account.problem);
         await this.host.openPanel();
         return this.idle();
       }
       if (account.project === "blocked") return this.idle(); // the panel explains the free plan's one project
-      if (!(await this.askToCheck())) return;
-      const { scan } = this;
-      if (scan.status !== "ready") return this.idle();
-      const problem = this.whyNot(scan);
+      const items = await this.askToCheck(scan, health);
+      if (!items) return;
+      const problem = this.whyNot(items, health);
       if (problem) return this.fail(problem);
       // The free plan's one project becomes this vault, on the writer's first confirmed check.
       if (account.project === "unregistered") await registerProject(this.connection(), this.data.workspaceId, this.projectName());
-      await this.runConfirmed(scan.items, scan.source, account.health, this.price());
+      await this.runConfirmed(items, scan.source, health, this.priceFor(planQuote(items).chars, health));
     } catch (error) {
       this.fail(error instanceof Error ? error.message : "The check failed.");
     }
   }
 
-  /** The reading plan, or just the price when the plan stands. False leaves the panel as it should be. */
-  private async askToCheck(): Promise<boolean> {
-    const { scan, account } = this;
-    if (scan.status !== "ready") return false;
-    if (scan.needsConfirming || scan.pages.length === 0) return this.afterPlan(await this.openPlan("check"));
-    const problem = this.whyNot(scan);
-    if (problem) { this.fail(problem); return false; }
+  /** The reading plan, or just the price when the plan stands. Returns what the writer confirmed; null leaves the panel as it should be. */
+  private async askToCheck(scan: ReadyScan, health: PipelineV3Health): Promise<PlannedItem[] | null> {
+    if (scan.needsConfirming || scan.pages.length === 0) return this.openPlan(scan, "check", health);
+    const problem = this.whyNot(scan.items, health);
+    if (problem) { this.fail(problem); return null; }
     this.setPhase({ kind: "confirming" });
     const sources = scan.items.filter((item) => item.included).length;
-    const answer = await this.host.confirmCheck({ sources, noun: this.noun(sources), words: scan.words, credits: this.price(), balance: account.balance });
-    if (answer === "plan") return this.afterPlan(await this.openPlan("check"));
-    if (answer === "cancel") this.idle();
-    return answer === "check";
+    const answer = await this.host.confirmCheck({ sources, noun: this.noun(sources), words: scan.words, credits: this.priceFor(scan.chars, health), balance: this.account.balance });
+    if (answer === "plan") return this.openPlan(scan, "check", health);
+    if (answer === "cancel") { this.idle(); return null; }
+    return scan.items;
   }
 
-  private afterPlan(confirmed: boolean): boolean {
-    if (!confirmed) this.idle();
-    return confirmed;
-  }
-
-  /** Why a check of this scan cannot run, in the writer's words; said before anything is sent or spent. */
-  private whyNot(scan: Extract<Scan, { status: "ready" }>): string | null {
-    if (scan.pages.length === 0) return "Nothing is ticked in the reading plan.";
-    if (scan.problems.length > 0) return scan.problems[0];
-    if (scan.hasParts && !this.account.health?.readingParts) return "Part of this is too long to read in one go, and the Bunsho service cannot read it in pieces yet. You were not charged.";
+  /** Why a check of these items cannot run, in the writer's words; said before anything is sent or spent. */
+  private whyNot(items: readonly PlannedItem[], health: PipelineV3Health): string | null {
+    const quote = planQuote(items);
+    if (quote.units === 0) return "Nothing is ticked in the reading plan.";
+    if (quote.problems.length > 0) return quote.problems[0];
+    if (quote.hasParts && !health.readingParts) return "Part of this is too long to read in one go, and the Bunsho service cannot read it in pieces yet. You were not charged.";
     const { balance } = this.account;
-    const credits = this.price();
+    const credits = this.priceFor(quote.chars, health);
     if (credits !== null && balance !== null && balance < credits) {
       return `This check costs about ${formatNumber(credits)} credits and you have ${formatNumber(balance)}. Add credits in Bunsho, then try again.`;
     }
     return null;
   }
 
-  /** The reading plan screen. True when the writer pressed Check on it. */
-  private async openPlan(action: "check" | "save"): Promise<boolean> {
-    const { scan, account } = this;
-    if (scan.status !== "ready") return false;
+  /** The reading plan screen, over what this scan read. Returns the items as the writer left them; null when they did not confirm. */
+  private async openPlan(scan: ReadyScan, action: "check" | "save", health: PipelineV3Health | null): Promise<PlannedItem[] | null> {
     this.setPhase({ kind: "confirming" });
     const answer = await this.host.reviewPlan({
-      source: scan.source, items: scan.items, action, noun: (count) => this.noun(count), balance: account.balance, priceFor: (chars) => this.priceFor(chars),
+      source: scan.source, items: scan.items, action, noun: (count) => this.noun(count), balance: this.account.balance, priceFor: (chars) => this.priceFor(chars, health),
     });
-    if (answer?.kind === "change_source") { this.idle(); await this.chooseSource(); return false; }
-    if (!answer) { if (action === "save") this.idle(); return false; }
+    if (answer?.kind === "change_source") { this.idle(); await this.chooseSource(); return null; }
+    if (!answer) { this.idle(); return null; }
     this.data.plan = answer.plan;
     await this.save();
     await this.refreshScan();
-    if (action === "save") this.idle();
-    return action === "check";
+    return applyPlan(scan.items, answer.plan).items;
   }
 
   /** Reading plan from the panel: looks and edits, spends nothing. */
   async editPlan(): Promise<void> {
-    if (this.phase.kind !== "idle" && this.phase.kind !== "error") return;
-    await this.refreshScan();
-    await this.openPlan("save");
+    if (this.busy) return;
+    this.setPhase({ kind: "preparing" });
+    try {
+      const scan = await this.freshScan();
+      if (scan.status !== "ready") { new Notice("Bunsho: choose what to read first."); return this.idle(); }
+      await this.openPlan(scan, "save", this.account.health);
+      if (this.phase.kind === "confirming") this.idle();
+    } catch (error) {
+      this.fail(error instanceof Error ? error.message : "Could not read your notes.");
+    }
   }
 
   /** Lets the writer pick what Bunsho reads, then shows them how it will read it. */
   async chooseSource(): Promise<void> {
-    const choice = await this.host.pickSource(sourceOptions(this.app));
-    if (!choice) return;
-    const same = this.data.source?.kind === choice.kind && this.data.source.path === choice.path;
-    this.data.source = choice;
-    if (!same) this.data.plan = null;
-    await this.save();
-    await this.refreshScan();
-    if (this.scan.status === "ready") await this.openPlan("save");
+    if (this.busy) { new Notice("Bunsho is busy with a check. Try again when it finishes."); return; }
+    this.setPhase({ kind: "confirming" });
+    try {
+      const choice = await this.host.pickSource(sourceOptions(this.app));
+      if (!choice) return this.idle();
+      const same = this.data.source?.kind === choice.kind && this.data.source.path === choice.path;
+      this.data.source = choice;
+      if (!same) this.data.plan = null;
+      await this.save();
+      const scan = await this.freshScan();
+      this.idle();
+      if (scan.status === "ready") await this.openPlan(scan, "save", this.account.health);
+      if (this.phase.kind === "confirming") this.idle();
+    } catch (error) {
+      this.fail(error instanceof Error ? error.message : "Could not read your notes.");
+    }
   }
 
   /** The free plan's "replaces unlimited": this vault becomes the one project, on the writer's say-so. */
@@ -350,6 +392,7 @@ export class ContinuityController {
   private async runConfirmed(items: PlannedItem[], source: SourceChoice, health: PipelineV3Health, credits: number | null): Promise<void> {
     const abort = new AbortController();
     this.abort = abort;
+    this.reviewing = source;
     const tracker = new ProgressTracker();
     this.setPhase({ kind: "checking", share: 0, waiting: true });
     try {
@@ -358,7 +401,7 @@ export class ContinuityController {
         maxCredits: credits ?? undefined, signal: abort.signal,
         callbacks: { onProgress: (p) => this.setPhase({ kind: "checking", share: tracker.update(p), waiting: false, stage: p.stage }) },
       });
-      this.data.lastReview = outcome;
+      this.data.lastReview = { ...outcome, source: this.reviewing ?? outcome.source };
       await this.save();
       this.idle();
       await this.refreshAccount();
@@ -367,6 +410,7 @@ export class ContinuityController {
       else this.fail(error instanceof Error ? error.message : "The check failed.", error instanceof PipelineV3Error ? error.detail.charged : undefined);
     } finally {
       if (this.abort === abort) this.abort = null;
+      this.reviewing = null;
     }
   }
 

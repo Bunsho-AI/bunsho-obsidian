@@ -169,13 +169,14 @@ export function buildReadingUnits(sources: readonly SourceText[], options: Build
     minTailChars: options.minTailChars ?? READING_LIMITS.minTailChars,
   };
   const units: ReadingUnit[] = [];
-  let sourceOrder = 0;
   for (const source of sources) {
     const slices = sliceSection(source, 0, source.text.length, source.sourceId, source.label, opts, new Map());
     const groups = new Map<string, Slice[]>();
     for (const slice of slices) groups.set(slice.id, [...(groups.get(slice.id) ?? []), slice]);
     for (const [id, group] of groups) {
       const ids = new Map<string, number>();
+      // The group's place among all pages, so a part's chapter number rises in step with uncut pages and never collides.
+      const sourceOrder = units.length;
       group.forEach((slice, index) => {
         const raw = source.text.slice(slice.from, slice.to);
         const lead = raw.length - raw.trimStart().length;
@@ -193,7 +194,6 @@ export function buildReadingUnits(sources: readonly SourceText[], options: Build
           ...(slice.cut ? { part: { sourceId: id, sourceOrder, index, of: group.length } } : {}),
         });
       });
-      sourceOrder++;
     }
   }
   return units;

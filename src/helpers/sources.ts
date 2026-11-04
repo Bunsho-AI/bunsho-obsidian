@@ -6,6 +6,7 @@
  * items become reading units (lib/reading/units.ts), which are never shown. Only structure and sizes are read, never
  * words, so all of this holds in every language.
  */
+import { countWords } from "@/lib/contract/countWords";
 import { PIPELINE_V3_LIMITS } from "@/lib/contract/pipelineV3.types";
 import { buildReadingUnits, READING_LIMITS, type ReadingUnit, type SourceHeading } from "@/lib/reading/units";
 import { sha256 } from "@/utils/hash";
@@ -102,20 +103,29 @@ function noteItems(note: NoteInput, projection: Projection, source: SourceChoice
   const cuts = source.kind === "note" || text.length > READING_LIMITS.wholeChars ? divisions(projection) : [];
   if (cuts.length === 0) return [item(note.noteId, label, 0, text.length)];
 
+  const sections = cuts.map((from, i) => {
+    const to = cuts[i + 1] ?? text.length;
+    const [line, ...body] = text.slice(from, to).split("\n");
+    return { from, to, line: line.trim(), body: body.find((l) => l.trim())?.trim() ?? "" };
+  });
+  const repeats = new Map<string, number>();
+  for (const { line } of sections) repeats.set(line, (repeats.get(line) ?? 0) + 1);
   const seen = new Map<string, number>();
   const items: ReadingItem[] = [];
   if (text.slice(0, cuts[0]).trim()) items.push(item(`${note.noteId}#0`, label, 0, cuts[0]));
-  cuts.forEach((from, i) => {
-    const to = cuts[i + 1] ?? text.length;
-    const line = text.slice(from, to).split("\n", 1)[0].trim();
-    const key = sha256(line).slice(0, 10);
+  for (const { from, to, line, body } of sections) {
+    // A heading names its section, unless the note repeats it: then the id must follow the text, so swapping two sections
+    // cannot quietly move an exclusion onto the other one.
+    const key = sha256((repeats.get(line) ?? 0) > 1 ? `${line}\n${body}` : line).slice(0, 10);
     const count = (seen.get(key) ?? 0) + 1;
     seen.set(key, count);
     const heading = line || label;
     items.push(item(`${note.noteId}#${key}${count > 1 ? `.${count}` : ""}`, source.kind === "note" ? heading : `${label} / ${heading}`, from, to));
-  });
+  }
   return items;
 }
+
+const noteIdOf = (itemId: string): string => itemId.split("#", 1)[0];
 
 /** Every item of the source in natural order, and the notes with nothing to read. */
 export function buildItems(notes: readonly NoteInput[], source: SourceChoice): { items: ReadingItem[]; skipped: string[] } {
@@ -131,12 +141,15 @@ export function buildItems(notes: readonly NoteInput[], source: SourceChoice): {
 
 /**
  * The items in the writer's order with their exclusions. An item the plan has never seen goes after its natural neighbour,
- * and any difference from what was confirmed asks the writer to look again.
+ * and any difference from what was confirmed asks the writer to look again. When a note is divided differently than it was
+ * (it grew past the size that lists it by heading, say), a part the writer left out must not come back ticked: any new item of
+ * a note with a saved exclusion starts unticked.
  */
 export function applyPlan(items: readonly ReadingItem[], plan: SavedPlan | null): { items: PlannedItem[]; needsConfirming: boolean } {
   if (!plan) return { items: items.map((item) => ({ ...item, included: !item.leaveOut })), needsConfirming: true };
   const byId = new Map(items.map((item) => [item.id, item]));
   const excluded = new Set(plan.excluded);
+  const notesWithExclusions = new Set(plan.excluded.map(noteIdOf));
   const ordered: ReadingItem[] = plan.order.flatMap((id) => { const item = byId.get(id); return item ? [item] : []; });
   const known = new Set(plan.order);
   let added = false;
@@ -148,7 +161,7 @@ export function applyPlan(items: readonly ReadingItem[], plan: SavedPlan | null)
   });
   const missing = plan.order.some((id) => !byId.has(id));
   return {
-    items: ordered.map((item) => ({ ...item, included: known.has(item.id) ? !excluded.has(item.id) : !item.leaveOut })),
+    items: ordered.map((item) => ({ ...item, included: known.has(item.id) ? !excluded.has(item.id) : !item.leaveOut && !notesWithExclusions.has(item.noteId) })),
     needsConfirming: added || missing,
   };
 }
@@ -166,14 +179,14 @@ export function buildUnits(items: readonly PlannedItem[], hash: (text: string) =
   return { units, pages };
 }
 
-export interface PlanQuote { chars: number; words: number; units: number; sources: number; problems: string[] }
+export interface PlanQuote { chars: number; words: number; units: number; sources: number; hasParts: boolean; problems: string[] }
 
 /** Exactly what the plan would send, and anything the engine would refuse. Hashes nothing, so the plan screen can call it on every tick. */
 export function planQuote(items: readonly PlannedItem[]): PlanQuote {
   const { units } = buildUnits(items, () => "");
   return {
-    chars: units.reduce((n, u) => n + u.text.length, 0), words: units.reduce((n, u) => n + roughWords(u.text), 0),
-    units: units.length, sources: items.filter((item) => item.included).length, problems: sourceProblems(units),
+    chars: units.reduce((n, u) => n + u.text.length, 0), words: units.reduce((n, u) => n + countWords(u.text), 0),
+    hasParts: units.some((u) => u.part !== undefined), units: units.length, sources: items.filter((item) => item.included).length, problems: sourceProblems(units),
   };
 }
 
@@ -193,22 +206,25 @@ export function sourceProblems(units: readonly Pick<ReadingUnit, "label" | "text
   return problems;
 }
 
-/** The note-id map after a rename. A renamed folder moves everything under it. */
+const isUnder = (path: string, parent: string): boolean => path === parent || path.startsWith(`${parent}/`);
+
+/** The note-id map after a rename. A renamed folder moves everything under it, and what moved wins over a stale entry at the new path. */
 export function moveNoteIds(ids: Readonly<Record<string, string>>, oldPath: string, newPath: string): Record<string, string> {
   const next: Record<string, string> = {};
-  for (const [path, id] of Object.entries(ids)) {
-    if (path === oldPath) next[newPath] = id;
-    else if (path.startsWith(`${oldPath}/`)) next[`${newPath}${path.slice(oldPath.length)}`] = id;
-    else next[path] = id;
-  }
+  for (const [path, id] of Object.entries(ids)) if (!isUnder(path, oldPath)) next[path] = id;
+  for (const [path, id] of Object.entries(ids)) if (isUnder(path, oldPath)) next[`${newPath}${path.slice(oldPath.length)}`] = id;
   return next;
 }
+
+/** The note-id map after a delete, so a new note at that path is a new note to the plan. */
+export function dropNoteIds(ids: Readonly<Record<string, string>>, path: string): Record<string, string> {
+  return Object.fromEntries(Object.entries(ids).filter(([known]) => !isUnder(known, path)));
+}
+
+export const holdsNoteId = (ids: Readonly<Record<string, string>>, path: string): boolean => Object.keys(ids).some((known) => isUnder(known, path));
 
 /** The manuscript snapshot id (desktop manuscriptSnapshotId): citations carry it back so a result can be matched to the text sent. */
 export function snapshotId(pages: readonly Pick<ReadingUnit, "pageId" | "order" | "text">[]): string {
   return sha256(JSON.stringify([...pages].sort((a, b) => a.order - b.order)
     .map(({ pageId, order, text }) => ({ pageId, pageOrder: order, rev: sha256(text), length: text.length }))));
 }
-
-/** Words for the price line: whitespace-separated runs, a rough count only (never sent anywhere). */
-export const roughWords = (text: string): number => (text.match(/\S+/gu) ?? []).length;

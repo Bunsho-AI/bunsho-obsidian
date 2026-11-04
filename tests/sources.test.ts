@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyPlan, buildItems, buildUnits, comparePaths, moveNoteIds, planQuote, roughWords, sourceContains, sourceProblems, snapshotId, type NoteInput, type SourceChoice } from "@/helpers/sources";
+import { applyPlan, buildItems, buildUnits, comparePaths, dropNoteIds, moveNoteIds, planQuote, sourceContains, sourceProblems, snapshotId, type NoteInput, type SourceChoice } from "@/helpers/sources";
 
 const FOLDER: SourceChoice = { kind: "folder", path: "Book" };
 const note = (path: string, text: string, leaveOut = false): NoteInput => ({
@@ -62,11 +62,24 @@ describe("buildItems", () => {
     expect(items.map((i) => i.label)).toEqual(["a / One", "a / Two"]);
   });
 
-  it("gives repeated headings their own stable ids", () => {
-    const { items } = buildItems([note("Book.md", "# Scene\nFirst.\n# Scene\nSecond.")], { kind: "note", path: "Book.md" });
-    expect(new Set(items.map((i) => i.id)).size).toBe(2);
-    const again = buildItems([note("Book.md", "# Scene\nFirst, edited.\n# Scene\nSecond.")], { kind: "note", path: "Book.md" });
+  it("keeps a section's id when its text below the first line is edited", () => {
+    const { items } = buildItems([note("Book.md", "# One\nFirst.\n# Two\nSecond.")], { kind: "note", path: "Book.md" });
+    const again = buildItems([note("Book.md", "# One\nFirst, edited.\nMore.\n# Two\nSecond.")], { kind: "note", path: "Book.md" });
     expect(again.items.map((i) => i.id)).toEqual(items.map((i) => i.id));
+  });
+
+  it("gives repeated headings ids that follow their text, so swapping them cannot move an exclusion", () => {
+    const source = { kind: "note" as const, path: "Book.md" };
+    const { items } = buildItems([note("Book.md", "# Notes\nStory.\n# Notes\nResearch.")], source);
+    expect(new Set(items.map((i) => i.id)).size).toBe(2);
+    const plan = { order: items.map((i) => i.id), excluded: [items[1].id] };
+    const swapped = applyPlan(buildItems([note("Book.md", "# Notes\nResearch.\n# Notes\nStory.")], source).items, plan);
+    expect(swapped.items.filter((i) => i.included).map((i) => i.text.trim())).toEqual(["Notes\nStory."]);
+  });
+
+  it("keeps identical repeated sections apart", () => {
+    const { items } = buildItems([note("Book.md", "# Notes\nSame.\n# Notes\nSame.")], { kind: "note", path: "Book.md" });
+    expect(new Set(items.map((i) => i.id)).size).toBe(2);
   });
 
   it("holds in any language, because it reads only structure", () => {
@@ -102,6 +115,19 @@ describe("applyPlan", () => {
     const plan = applyPlan(items, { order: [three, one], excluded: [] });
     expect(plan.items.map((i) => i.id)).toEqual([three, one, two]);
     expect(plan.needsConfirming).toBe(true);
+  });
+
+  it("does not bring an excluded part back when its note is divided differently", () => {
+    const long = `# One\n${para("one", 20_000)}\n# Two\n${para("two", 20_000)}`;
+    const whole = buildItems([note("Book/a.md", "Short research.")], FOLDER).items;
+    const grown = applyPlan(buildItems([note("Book/a.md", long)], FOLDER).items, { order: [whole[0].id], excluded: [whole[0].id] });
+    expect(grown.needsConfirming).toBe(true);
+    expect(grown.items.every((i) => !i.included)).toBe(true);
+
+    const sections = buildItems([note("Book/a.md", long)], FOLDER).items;
+    const shrunk = applyPlan(whole, { order: sections.map((i) => i.id), excluded: [sections[0].id] });
+    expect(shrunk.needsConfirming).toBe(true);
+    expect(shrunk.items[0].included).toBe(false);
   });
 
   it("asks again when a note disappears", () => {
@@ -153,7 +179,7 @@ describe("planQuote", () => {
   it("counts exactly the text that will be sent", () => {
     const { items } = buildItems([note("Book/1.md", "one two"), note("Book/2.md", "three")], FOLDER);
     const plan = applyPlan(items, { order: items.map((i) => i.id), excluded: [items[1].id] });
-    expect(planQuote(plan.items)).toEqual({ chars: 7, words: 2, units: 1, sources: 1, problems: [] });
+    expect(planQuote(plan.items)).toEqual({ chars: 7, words: 2, units: 1, sources: 1, hasParts: false, problems: [] });
   });
 });
 
@@ -188,6 +214,17 @@ describe("note identity", () => {
   });
 });
 
+describe("deleted and overwritten notes", () => {
+  it("forgets a deleted note, and everything under a deleted folder", () => {
+    expect(dropNoteIds({ "Book/a.md": "1", "Book/b/c.md": "2", "Other.md": "3" }, "Book")).toEqual({ "Other.md": "3" });
+    expect(dropNoteIds({ "Book/a.md": "1", "Bookish.md": "2" }, "Book/a.md")).toEqual({ "Bookish.md": "2" });
+  });
+  it("lets a moved note win over a stale entry at its new path", () => {
+    expect(moveNoteIds({ "Bar.md": "moved", "Foo.md": "stale" }, "Bar.md", "Foo.md")).toEqual({ "Foo.md": "moved" });
+    expect(moveNoteIds({ "Foo.md": "stale", "Bar.md": "moved" }, "Bar.md", "Foo.md")).toEqual({ "Foo.md": "moved" });
+  });
+});
+
 describe("snapshotId", () => {
   it("changes with the text and with the order", () => {
     const a = snapshotId([{ pageId: "p", order: 0, text: "Hello." }]);
@@ -195,5 +232,4 @@ describe("snapshotId", () => {
     expect(a).not.toBe(snapshotId([{ pageId: "p", order: 0, text: "Hello!" }]));
     expect(a).not.toBe(snapshotId([{ pageId: "p", order: 1, text: "Hello." }]));
   });
-  it("roughWords counts whitespace-separated runs", () => { expect(roughWords("a b\nc")).toBe(3); });
 });

@@ -5,7 +5,9 @@ export interface MockEngine {
   port: number;
   requests: Array<{ url?: string; headers: Record<string, string | string[] | undefined>; socket?: boolean }>;
   /** Every review's start payload, as sent. */
-  starts: Array<{ pages: Array<{ pageId: string; order: number; rev: string; send: string; part?: { sourceId: string; sourceOrder: number; index: number; of: number } }> }>;
+  /** Every page's text, as sent. */
+  sentPages: Array<{ pageId: string; text: string }>;
+  starts: Array<{ maxCredits?: number; pages: Array<{ pageId: string; order: number; rev: string; send: string; part?: { sourceId: string; sourceOrder: number; index: number; of: number } }> }>;
   registration(): { workspaceId: string; name: string | null } | null;
   close(): Promise<void>;
 }

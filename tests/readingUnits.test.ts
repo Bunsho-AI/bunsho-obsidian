@@ -136,4 +136,14 @@ describe("buildReadingUnits", () => {
     const units = buildReadingUnits([note("book.md", prose(70))], { hash, wholeChars: 12_000 });
     expect(units.length).toBeGreaterThan(1);
   });
+
+  it("numbers parts in step with uncut pages, so chapter labels never repeat or go backwards", () => {
+    const long = (seed: string) => Array.from({ length: 900 }, (_, i) => `${seed} ${i} is a line of plain prose that keeps going.`).join("\n");
+    const units = buildReadingUnits([{ sourceId: "a", label: "A", text: long("a") }, { sourceId: "b", label: "B", text: "Short." }, { sourceId: "c", label: "C", text: long("c") }], { hash: (t) => t.slice(0, 8) });
+    const labels = units.map((u) => u.part?.sourceOrder ?? u.order);
+    expect([...labels].sort((x, y) => x - y)).toEqual(labels);
+    const b = units.find((u) => u.sourceId === "b")!;
+    const c = units.find((u) => u.sourceId === "c")!;
+    expect(c.part!.sourceOrder).toBeGreaterThan(b.order);
+  });
 });

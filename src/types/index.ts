@@ -34,7 +34,7 @@ export type Scan =
     /** The reading plan differs from what the writer last confirmed. */
     needsConfirming: boolean;
     /** Exactly what a check would send. Reading units are never shown. */
-    pages: PageMeta[]; hasParts: boolean; problems: string[];
+    pages: PageMeta[];
     chars: number; words: number; snapshotId: string;
     /** Notes with nothing to read. */
     skipped: string[];

@@ -44,6 +44,7 @@ export function findings(start, pages) {
 export function startMockEngine({ port = 0, balance = 500, tamper = false, failWith = null, holdOpen = false, paid = false, registered = null, starter = 0, readingParts = true } = {}) {
   const requests = [];
   const starts = [];
+  const sentPages = [];
   let registration = registered; // { workspaceId, name } | null: the account's one free project
   const server = http.createServer((req, res) => {
     requests.push({ url: req.url, headers: req.headers });
@@ -81,7 +82,7 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
       const message = JSON.parse(data.toString());
       if (message.type === "cancel") return socket.close(1000);
       if (message.type === "start") { start = message.payload; starts.push(start); }
-      if (message.type === "page") pages.set(message.payload.pageId, message.payload.text);
+      if (message.type === "page") { pages.set(message.payload.pageId, message.payload.text); sentPages.push(message.payload); }
       if (!start || pages.size < start.pages.filter((p) => p.send === "whole").length) return;
       if (!readingParts && start.pages.some((p) => p.part)) { // the engine's start schema is strict
         socket.send(frame("error", { code: "invalid_request", message: "That request was not valid. You were not charged.", charged: false }));
@@ -108,7 +109,7 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
     });
   });
   return new Promise((resolve) => server.listen(port, "127.0.0.1", () => resolve({
-    port: server.address().port, requests, starts, registration: () => registration, close: () => new Promise((done) => { wss.close(); server.closeAllConnections?.(); server.close(done); }),
+    port: server.address().port, requests, starts, sentPages, registration: () => registration, close: () => new Promise((done) => { wss.close(); server.closeAllConnections?.(); server.close(done); }),
   })));
 }
 

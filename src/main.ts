@@ -42,10 +42,11 @@ export default class BunshoPlugin extends Plugin {
     // The vault is not indexed until the workspace is ready; registering earlier would scan once per file at startup.
     this.app.workspace.onLayoutReady(() => {
       void this.controller.refresh();
+      const warn = (error: unknown) => console.warn("[Bunsho] could not save", error);
       const onChange = (path: string, oldPath?: string) => { if (this.controller.touchesSource(path, oldPath)) this.controller.scheduleScan(); };
       this.registerEvent(this.app.vault.on("create", (file) => onChange(file.path)));
-      this.registerEvent(this.app.vault.on("delete", (file) => onChange(file.path)));
-      this.registerEvent(this.app.vault.on("rename", (file, oldPath) => { void this.controller.moved(file.path, oldPath).then(() => onChange(file.path, oldPath)); }));
+      this.registerEvent(this.app.vault.on("delete", (file) => { void this.controller.deleted(file.path).catch(warn); onChange(file.path); }));
+      this.registerEvent(this.app.vault.on("rename", (file, oldPath) => { void this.controller.moved(file.path, oldPath).catch(warn).finally(() => onChange(file.path, oldPath)); }));
       this.registerEvent(this.app.vault.on("modify", (file) => onChange(file.path))); // a note autosaves every couple of seconds while typing
     });
   }
