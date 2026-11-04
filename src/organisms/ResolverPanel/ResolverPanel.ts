@@ -13,23 +13,27 @@ export interface ResolverPanelProps {
   note: string | null;
   subject: string | null;
   summary: string | null;
+  /** A decision is being saved. */
+  busy: boolean;
   onClose: () => void;
   onDeliberate: () => void;
   onDismiss: () => void;
   onNext: (() => void) | null;
 }
 
-function block(parent: HTMLElement, label: string, loud: boolean, passage: ResolverPassage): void {
+function block(parent: HTMLElement, label: string, loud: boolean, passage: ResolverPassage, index: number): void {
   const card = parent.createDiv({ cls: `bunsho-card${loud ? " is-rank1" : ""}` });
   card.createSpan({ cls: loud ? "bunsho-severity" : "bunsho-caps", text: label });
   card.createDiv({ cls: "bunsho-rail-quote", text: `“${passage.quote}”` });
   const foot = card.createDiv({ cls: "bunsho-card-foot" });
   Fact(foot, passage.coordinate, "bunsho-coords");
-  TextAction(foot, { label: "Open", plain: true, onClick: passage.onOpen });
+  TextAction(foot, { label: "Open", plain: true, focusKey: `resolver:open:${index}`, onClick: passage.onOpen });
 }
 
-function button(parent: HTMLElement, label: string, cls: string, onClick: () => void): void {
-  parent.createEl("button", { cls: `bunsho-decision ${cls}`, text: label }).onclick = onClick;
+function button(parent: HTMLElement, label: string, cls: string, key: string, busy: boolean, onClick: () => void): void {
+  const element = parent.createEl("button", { cls: `bunsho-decision ${cls}`, text: label, attr: { "data-focus-key": `resolver:${key}` } });
+  element.disabled = busy;
+  element.onclick = onClick;
 }
 
 export function ResolverPanel(parent: HTMLElement, props: ResolverPanelProps): void {
@@ -40,7 +44,7 @@ export function ResolverPanel(parent: HTMLElement, props: ResolverPanelProps): v
   close.onclick = props.onClose;
 
   const rail = root.createDiv({ cls: "bunsho-list" });
-  props.passages.forEach((passage, index) => block(rail, index === 0 ? "This page" : "Contradicts", index === 0, passage));
+  props.passages.forEach((passage, index) => block(rail, index === 0 ? "This page" : "Contradicts", index === 0, passage, index));
   if (props.note) {
     const note = rail.createDiv({ cls: "bunsho-card bunsho-rail-plain" });
     note.createSpan({ cls: "bunsho-caps", text: "Note" });
@@ -54,7 +58,7 @@ export function ResolverPanel(parent: HTMLElement, props: ResolverPanelProps): v
   }
 
   const bar = root.createDiv({ cls: "bunsho-decision-bar" });
-  button(bar, "This is deliberate", "is-success", props.onDeliberate);
-  button(bar, "Dismiss", "", props.onDismiss);
-  if (props.onNext) button(bar, "Next Issue →", "is-next", props.onNext);
+  button(bar, "This is deliberate", "is-success", "deliberate", props.busy, props.onDeliberate);
+  button(bar, "Dismiss", "", "dismiss", props.busy, props.onDismiss);
+  if (props.onNext) button(bar, "Next Issue →", "is-next", "next", props.busy, props.onNext);
 }

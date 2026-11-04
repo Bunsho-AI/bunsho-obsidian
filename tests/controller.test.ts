@@ -402,6 +402,27 @@ describe("saving", () => {
     expect(controller.data.deliberate).toEqual(["b"]);
   });
 
+  it("restoring clears both decisions, and a failed save takes the decision back", async () => {
+    let fail = false;
+    const { controller } = await setup({ notes: { "Book/a.md": "One." }, host: { saveData: async () => { if (fail) throw new Error("disk"); } } });
+    await controller.dismiss("a", true);
+    await controller.markDeliberate("b", true);
+    await controller.restoreFinding("a");
+    await controller.restoreFinding("b");
+    expect([controller.data.dismissed, controller.data.deliberate]).toEqual([[], []]);
+    fail = true;
+    await expect(controller.markDeliberate("c", true)).rejects.toThrow("disk");
+    await expect(controller.dismiss("d", true)).rejects.toThrow("disk");
+    expect([controller.data.dismissed, controller.data.deliberate]).toEqual([[], []]);
+  });
+
+  it("corrupt decisions or findings in the data file do not reach the panel", async () => {
+    const { controller } = await setup({ notes: { "Book/a.md": "One." }, data: { dismissed: { a: 1 }, deliberate: ["ok", 5], lastReview: { pages: [], issues: "nope" } } });
+    expect(controller.data.dismissed).toEqual([]);
+    expect(controller.data.deliberate).toEqual(["ok"]);
+    expect(controller.data.lastReview).toBeNull();
+  });
+
   it("a failed write does not block the next one", async () => {
     let fail = false;
     const { controller } = await setup({ notes: { "Book/a.md": "One." }, host: { saveData: () => {

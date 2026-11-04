@@ -98,3 +98,7 @@ src/
 - Each component lives in its own folder with an `index.ts`. Imports use the `@/` alias for `src/`.
 
 `src/lib/contract/` holds modules copied from the Bunsho desktop app (the review wire contract, pricing, and citation grounding). They are one contract with the engine; change them together.
+
+## Fonts
+
+`styles.css` embeds Literata, IBM Plex Sans and Courier Prime under the SIL Open Font License 1.1. Their copyright notices and the license text are in that file.

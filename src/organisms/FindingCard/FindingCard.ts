@@ -26,7 +26,7 @@ export function FindingCard(parent: HTMLElement, props: FindingCardProps): HTMLE
   const foot = card.createDiv({ cls: "bunsho-card-foot" });
   Fact(foot, props.coordinate, "bunsho-coords");
   const actions = foot.createSpan({ cls: "bunsho-actions" });
-  TextAction(actions, { label: "Not an error", quiet: true, onClick: props.onDismiss });
+  TextAction(actions, { label: "Not an error", quiet: true, focusKey: `dismiss:${props.id}`, onClick: props.onDismiss });
   TextAction(actions, { label: "Resolve", plain: true, focusKey: `resolve:${props.id}`, onClick: props.onResolve });
   return card;
 }

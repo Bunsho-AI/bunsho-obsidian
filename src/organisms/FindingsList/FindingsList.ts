@@ -46,15 +46,15 @@ export function FindingsList(parent: HTMLElement, props: FindingsListProps): voi
   if (props.resolved.length > 0) {
     const footer = parent.createDiv({ cls: "bunsho-footer" });
     footer.createSpan({ text: `${props.resolved.length} resolved this session \u00b7 ` });
-    TextAction(footer, { label: props.showResolved ? "Hide" : "Show", plain: true, onClick: props.onToggleShowResolved });
+    TextAction(footer, { label: props.showResolved ? "Hide" : "Show", plain: true, focusKey: "resolved:toggle", onClick: props.onToggleShowResolved });
     if (props.showResolved) {
       const list = parent.createDiv({ cls: "bunsho-list bunsho-resolved" });
       for (const item of props.resolved) {
         const row = list.createDiv({ cls: "bunsho-card bunsho-resolved-row" });
-        row.createSpan({ cls: "bunsho-claim bunsho-resolved-claim", text: item.claim });
+        row.createSpan({ cls: "bunsho-claim bunsho-resolved-claim", text: item.claim, attr: { title: item.claim } });
         const end = row.createSpan({ cls: "bunsho-actions" });
         Fact(end, item.status, "bunsho-resolved-status");
-        TextAction(end, { label: "Restore", quiet: true, onClick: item.onRestore });
+        TextAction(end, { label: "Restore", quiet: true, focusKey: `restore:${item.id}`, onClick: item.onRestore });
       }
     }
   }

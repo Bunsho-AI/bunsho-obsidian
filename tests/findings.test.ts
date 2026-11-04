@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cardEvidence, nextOpenIssue, railEvidence, resolverContext, resolutionOf } from "@/helpers/findings";
+import { cardEvidence, displayOrder, keepSettledFindings, nextOpenIssue, railEvidence, resolverContext, resolutionOf } from "@/helpers/findings";
 import { PANEL_TABS } from "@/helpers/panelTabs";
 import type { EngineIssue, EngineIssueCitation } from "@/lib/contract/engine.types";
 
@@ -65,5 +65,39 @@ describe("the panel's tabs", () => {
       { id: "world", label: "World", icon: "globe" },
       { id: "continuity", label: "Continuity", icon: "check-circle-2" },
     ]);
+  });
+});
+
+describe("order and carried decisions", () => {
+  it("next issue follows the panel's order, errors first", () => {
+    const open = displayOrder([issue({ issue_id: "w1", severity: "warning" }), issue({ issue_id: "e" }), issue({ issue_id: "w2", severity: "warning" })]);
+    expect(open.map((i) => i.issue_id)).toEqual(["e", "w1", "w2"]);
+    expect(nextOpenIssue(open, "e")?.issue_id).toBe("w1");
+  });
+
+  const finding = (id: string, quotes: string[], subject = "Mira", pages = ["p1", "p2"]) => issue({
+    issue_id: id, context_json: JSON.stringify({ findingType: "contradiction", subject }),
+    citations: quotes.map((quote, i) => cite(pages[i] ?? "p1", "prior_fact", quote)),
+  });
+
+  it("a settled finding keeps its id when the writer rewords one side", () => {
+    const before = finding("old", ["Her eyes were green.", "Her eyes were brown."]);
+    const after = finding("new", ["Her eyes were green.", "By then her eyes were brown and tired."]);
+    expect(keepSettledFindings([after], [before], new Set(["old"]))[0].issue_id).toBe("old");
+  });
+
+  it("a new problem never takes an old decision", () => {
+    const before = finding("old", ["Her eyes were green.", "Her eyes were brown."]);
+    expect(keepSettledFindings([finding("n1", ["He sold the boat.", "He kept the boat."])], [before], new Set(["old"]))[0].issue_id).toBe("n1");
+    expect(keepSettledFindings([finding("n2", ["Her eyes were green.", "x"], "Juna")], [before], new Set(["old"]))[0].issue_id).toBe("n2");
+    expect(keepSettledFindings([finding("n3", ["Her eyes were green.", "x"], "Mira", ["p1", "p9"])], [before], new Set(["old"]))[0].issue_id).toBe("n3");
+  });
+
+  it("does nothing when the finding came back unchanged, was never settled, or the match is ambiguous", () => {
+    const before = finding("old", ["Her eyes were green.", "Her eyes were brown."]);
+    expect(keepSettledFindings([before], [before], new Set(["old"]))[0].issue_id).toBe("old");
+    expect(keepSettledFindings([finding("n", ["Her eyes were green.", "y"])], [before], new Set())[0].issue_id).toBe("n");
+    const twins = [finding("a", ["Her eyes were green.", "y"]), finding("b", ["Her eyes were green.", "z"])];
+    expect(keepSettledFindings(twins, [before], new Set(["old"])).map((i) => i.issue_id)).toEqual(["a", "b"]);
   });
 });
