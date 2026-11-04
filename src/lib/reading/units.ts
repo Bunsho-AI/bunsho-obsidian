@@ -71,6 +71,7 @@ export interface BuildOptions {
   wholeChars?: number;
   minPartChars?: number;
   maxPartChars?: number;
+  minTailChars?: number;
 }
 
 /** FNV-1a. Picks cut points and short ids; it does not need to resist anyone. */
@@ -103,7 +104,7 @@ function tooLong(text: string, wholeChars: number): boolean {
  * a scene break when there is one, otherwise before the paragraph with the lowest hash. Choosing by content, and not by
  * position, means an edit moves only nearby cuts and later ones fall back into place, with nothing stored.
  */
-function partStarts(paras: readonly Paragraph[], base: number, end: number, opts: Required<Pick<BuildOptions, "minPartChars" | "maxPartChars">>): number[] {
+function partStarts(paras: readonly Paragraph[], base: number, end: number, opts: Required<Pick<BuildOptions, "minPartChars" | "maxPartChars" | "minTailChars">>): number[] {
   const starts: number[] = [];
   let first = 0;
   const startOf = (i: number) => paras[i]?.start ?? end;
@@ -115,7 +116,7 @@ function partStarts(paras: readonly Paragraph[], base: number, end: number, opts
       const size = paras[i].start - from;
       if (size < opts.minPartChars) continue;
       if (size > opts.maxPartChars) break;
-      if (end - paras[i].start >= READING_LIMITS.minTailChars) candidates.push(i);
+      if (end - paras[i].start >= opts.minTailChars) candidates.push(i);
     }
     let cut: number | undefined;
     const afterBreak = candidates.filter((i) => isSceneBreak(paras[i - 1]) && !isSceneBreak(paras[i]));
@@ -123,7 +124,7 @@ function partStarts(paras: readonly Paragraph[], base: number, end: number, opts
     for (const i of pool) if (cut === undefined || fnv1a(paras[i].text) < fnv1a(paras[cut].text)) cut = i;
     if (cut === undefined) {
       // One paragraph runs past the window. Cut at the next paragraph end, or send the rest as one piece.
-      const next = paras.findIndex((p, i) => i > first && p.start - from >= opts.minPartChars && end - p.start >= READING_LIMITS.minTailChars);
+      const next = paras.findIndex((p, i) => i > first && p.start - from >= opts.minPartChars && end - p.start >= opts.minTailChars);
       if (next < 0) return starts;
       cut = next;
     }
@@ -133,7 +134,7 @@ function partStarts(paras: readonly Paragraph[], base: number, end: number, opts
 }
 
 /** Divides a stretch of a source at its highest headings, then cuts what is still too long. */
-function sliceSection(source: SourceText, from: number, to: number, id: string, label: string, opts: Required<Pick<BuildOptions, "wholeChars" | "minPartChars" | "maxPartChars">>, seen: Map<string, number>): Slice[] {
+function sliceSection(source: SourceText, from: number, to: number, id: string, label: string, opts: Required<Omit<BuildOptions, "hash">>, seen: Map<string, number>): Slice[] {
   const text = source.text.slice(from, to);
   if (!text.trim()) return [];
   if (!tooLong(text, opts.wholeChars)) return [{ from, to, id, label, cut: false }];
@@ -165,6 +166,7 @@ export function buildReadingUnits(sources: readonly SourceText[], options: Build
     wholeChars: options.wholeChars ?? READING_LIMITS.wholeChars,
     minPartChars: options.minPartChars ?? READING_LIMITS.minPartChars,
     maxPartChars: options.maxPartChars ?? READING_LIMITS.maxPartChars,
+    minTailChars: options.minTailChars ?? READING_LIMITS.minTailChars,
   };
   const units: ReadingUnit[] = [];
   let sourceOrder = 0;
