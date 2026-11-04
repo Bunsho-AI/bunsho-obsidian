@@ -16,7 +16,9 @@ import { AlertCard } from "@/molecules/AlertCard";
 import { BrandHeader } from "@/molecules/BrandHeader";
 import { EmptyState } from "@/molecules/EmptyState";
 import { StatusRow } from "@/molecules/StatusRow";
-import { FindingsList, type FindingItem } from "@/organisms/FindingsList";
+import { cardEvidence, nextOpenIssue, railEvidence, resolutionOf, resolverContext } from "@/helpers/findings";
+import { FindingsList, type FindingItem, type ResolvedItem } from "@/organisms/FindingsList";
+import { ResolverPanel } from "@/organisms/ResolverPanel";
 import { WorldList } from "@/organisms/WorldList";
 import { PanelTabs } from "@/molecules/PanelTabs";
 import type { WorldEntity, WorldFilter } from "@/helpers/world";
@@ -34,8 +36,11 @@ const STAGE_LABEL: Record<string, string> = {
 };
 
 export class ContinuityView extends ItemView {
-  private showDismissed = false;
-  private readonly expanded = new Set<string>();
+  private showResolved = false;
+  /** The finding open on the Resolve screen, which takes the panel's place as the desktop's takes the window's. */
+  private resolving: string | null = null;
+  /** Where the keyboard goes after this render, when the element it was on has gone. */
+  private focusNext: string | null = null;
   private tab: "findings" | "world" = "findings";
   private worldFilter: WorldFilter = "people";
   private worldSearch = "";
@@ -62,7 +67,8 @@ export class ContinuityView extends ItemView {
     const active = root.ownerDocument.activeElement;
     const search = root.querySelector<HTMLInputElement>(".bunsho-world-search");
     const caret = search && active === search ? [search.selectionStart, search.selectionEnd] as const : null;
-    const focusKey = active && root.contains(active) ? active.getAttribute("data-focus-key") : null;
+    const focusKey = this.focusNext ?? (active && root.contains(active) ? active.getAttribute("data-focus-key") : null);
+    this.focusNext = null;
     const scroll = this.resetScroll ? 0 : root.scrollTop;
     this.resetScroll = false;
     root.empty();
@@ -93,6 +99,7 @@ export class ContinuityView extends ItemView {
     const c = this.controller;
     const { scan } = c;
     if (scan.status === "ready") {
+      if (this.renderResolver(body)) return;
       this.renderSource(body, scan.source.kind === "folder" && scan.source.path === "/" ? "Whole vault" : scan.source.path);
       PanelTabs(body, { active: this.tab, onSelect: (tab) => { this.tab = tab; this.resetScroll = true; this.render(); }, tabs: [{ id: "findings", label: "Findings" }, { id: "world", label: "World" }] });
       if (this.tab === "world") this.renderWorld(body); else this.renderFindings(body);
@@ -172,28 +179,72 @@ export class ContinuityView extends ItemView {
       return;
     }
     const dismissed = new Set(c.data.dismissed);
+    const deliberate = new Set(c.data.deliberate);
     const pages = new Map(review.pages.map((page) => [page.pageId, page]));
-    const toItem = (issue: EngineIssue): FindingItem => ({
-      id: issue.issue_id,
-      claim: issue.message,
-      severity: issue.severity,
-      passages: issue.citations.filter((ct) => ct.evidence_role !== "supporting_context").map((ct) => ({
-        quote: ct.quoted_text, coordinate: this.coordinate(ct, pages, true), shortCoordinate: this.coordinate(ct, pages, false),
-        onGo: () => void c.jump(ct),
-      })),
-      expanded: this.expanded.has(issue.issue_id),
-      onExpand: () => { this.expanded.add(issue.issue_id); this.render(); },
-      onToggleDismissed: () => void c.dismiss(issue.issue_id, !dismissed.has(issue.issue_id)),
+    const toItem = (issue: EngineIssue): FindingItem => {
+      const evidence = cardEvidence(issue);
+      return {
+        id: issue.issue_id,
+        claim: issue.message,
+        severity: issue.severity,
+        quote: evidence?.quoted_text ?? null,
+        coordinate: evidence ? this.coordinate(evidence, pages) : "",
+        onDismiss: () => void c.dismiss(issue.issue_id, true),
+        onResolve: () => this.openResolver(issue.issue_id),
+      };
+    };
+    const resolved: ResolvedItem[] = review.issues.flatMap((issue) => {
+      const status = resolutionOf(issue.issue_id, dismissed, deliberate);
+      return status ? [{ id: issue.issue_id, claim: issue.message, status, onRestore: () => void this.restore(issue.issue_id) }] : [];
     });
     FindingsList(body, {
-      open: review.issues.filter((i) => !dismissed.has(i.issue_id)).map(toItem),
-      dismissed: review.issues.filter((i) => dismissed.has(i.issue_id)).map(toItem),
+      open: review.issues.filter((i) => !resolutionOf(i.issue_id, dismissed, deliberate)).map(toItem),
+      resolved,
       anyFindings: review.issues.length > 0,
       coverage: { read: review.coverage.sources.length - review.coverage.unreadSources.length, total: review.coverage.sources.length, excluded: review.coverage.excluded,
         noun: c.noun(review.coverage.sources.length), unreadLabels: review.coverage.sources.filter((source) => review.coverage.unreadSources.includes(source.id)).map((source) => source.label) },
-      showDismissed: this.showDismissed,
-      onToggleShowDismissed: () => { this.showDismissed = !this.showDismissed; this.render(); },
+      showResolved: this.showResolved,
+      onToggleShowResolved: () => { this.showResolved = !this.showResolved; this.render(); },
     });
+  }
+
+  private openResolver(id: string): void { this.resolving = id; this.focusNext = "resolver:close"; this.resetScroll = true; this.render(); }
+
+  private closeResolver(id: string): void {
+    this.resolving = null;
+    this.focusNext = `resolve:${id}`;
+    this.resetScroll = true;
+    this.render();
+  }
+
+  private async restore(id: string): Promise<void> {
+    await this.controller.dismiss(id, false);
+    await this.controller.markDeliberate(id, false);
+  }
+
+  /** Returns true when the Resolve screen took the panel. A finding a newer check no longer has simply closes it. */
+  private renderResolver(body: HTMLElement): boolean {
+    if (!this.resolving) return false;
+    const c = this.controller;
+    const review = c.currentReview();
+    const issue = review?.issues.find((i) => i.issue_id === this.resolving);
+    const dismissed = new Set(c.data.dismissed);
+    const deliberate = new Set(c.data.deliberate);
+    if (!review || !issue || resolutionOf(issue.issue_id, dismissed, deliberate)) { this.resolving = null; return false; }
+    const pages = new Map(review.pages.map((page) => [page.pageId, page]));
+    const open = review.issues.filter((i) => !resolutionOf(i.issue_id, dismissed, deliberate));
+    const next = nextOpenIssue(open, issue.issue_id);
+    const settle = async (action: () => Promise<void>) => { await action(); this.closeResolver(issue.issue_id); };
+    ResolverPanel(body, {
+      claim: issue.message,
+      passages: railEvidence(issue).map((citation) => ({ quote: citation.quoted_text, coordinate: this.coordinate(citation, pages), onOpen: () => void c.jump(citation) })),
+      ...resolverContext(issue),
+      onClose: () => this.closeResolver(issue.issue_id),
+      onDeliberate: () => void settle(() => c.markDeliberate(issue.issue_id, true)),
+      onDismiss: () => void settle(() => c.dismiss(issue.issue_id, true)),
+      onNext: next ? () => this.openResolver(next.issue_id) : null,
+    });
+    return true;
   }
 
   private renderWorld(body: HTMLElement): void {
@@ -232,9 +283,7 @@ export class ContinuityView extends ItemView {
   }
 
   /** Where a passage is, in the writer's terms: the note or section. Reading units are never shown. */
-  private coordinate(citation: EngineIssueCitation, pages: Map<string, PageMeta>, full: boolean): string {
-    const page = pages.get(citation.page_id);
-    if (!page) return citation.location_label;
-    return full ? page.label : page.label.split(" / ").pop() ?? page.label;
+  private coordinate(citation: EngineIssueCitation, pages: Map<string, PageMeta>): string {
+    return pages.get(citation.page_id)?.label ?? citation.location_label;
   }
 }

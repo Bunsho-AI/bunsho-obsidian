@@ -94,12 +94,13 @@ export class ContinuityController {
     const { manuscriptFolder, ...rest } = saved ?? {};
     this.data = {
       source: null, plan: null, noteIds: {}, engineUrl: AUTH_CONFIG.engineUrl, devUid: "",
-      installId: crypto.randomUUID(), workspaceId: crypto.randomUUID(), dismissed: [], lastReview: null, ...rest,
+      installId: crypto.randomUUID(), workspaceId: crypto.randomUUID(), dismissed: [], deliberate: [], lastReview: null, ...rest,
     };
     // Before the reading plan: the folder setting becomes the picked source, and a review from then cannot be mapped back.
     const folder = typeof manuscriptFolder === "string" ? manuscriptFolder.trim().replace(/^\/+|\/+$/gu, "") : "";
     if (!this.data.source && folder) this.data.source = { kind: "folder", path: folder };
     if (this.data.lastReview && !Array.isArray(this.data.lastReview.pages)) this.data.lastReview = null;
+    if (!Array.isArray(this.data.deliberate)) this.data.deliberate = [];
     // A vault's data.json can be synced or copied from elsewhere: never send a token to an address that is not ours to trust.
     if (!acceptableEngineUrl(this.data.engineUrl)) this.data.engineUrl = AUTH_CONFIG.engineUrl;
     await this.save();
@@ -502,6 +503,15 @@ export class ContinuityController {
     const set = new Set(this.data.dismissed);
     if (dismissed) set.add(issueId); else set.delete(issueId);
     this.data.dismissed = [...set];
+    await this.save();
+    this.host.changed();
+  }
+
+  /** "This is deliberate" on the Resolve screen: the difference is intended. Restoring reopens the finding. */
+  async markDeliberate(issueId: string, deliberate: boolean): Promise<void> {
+    const set = new Set(this.data.deliberate);
+    if (deliberate) set.add(issueId); else set.delete(issueId);
+    this.data.deliberate = [...set];
     await this.save();
     this.host.changed();
   }

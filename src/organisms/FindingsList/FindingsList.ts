@@ -2,21 +2,24 @@ import { Fact } from "@/atoms/Fact";
 import { TextAction } from "@/atoms/TextAction";
 import { EmptyState } from "@/molecules/EmptyState";
 import { GroupHeader } from "@/molecules/GroupHeader";
+import type { Resolution } from "@/helpers/findings";
 import { FindingCard, type FindingCardProps } from "@/organisms/FindingCard";
 
-/** Findings grouped as the desktop groups them, with the "Not an error" footer. */
-export type FindingItem = Omit<FindingCardProps, "rank1" | "dismissed"> & { id: string };
+/** Findings grouped as the desktop groups them, ending with what the writer has settled. */
+export type FindingItem = Omit<FindingCardProps, "rank1">;
+
+export interface ResolvedItem { id: string; claim: string; status: Resolution; onRestore: () => void }
 
 /** What the check read, always stated: a silent partial read is the failure Bunsho refuses to repeat. */
 export interface FindingsCoverage { read: number; total: number; excluded: number; noun: string; unreadLabels: string[] }
 
 export interface FindingsListProps {
   open: FindingItem[];
-  dismissed: FindingItem[];
+  resolved: ResolvedItem[];
   anyFindings: boolean;
   coverage: FindingsCoverage;
-  showDismissed: boolean;
-  onToggleShowDismissed: () => void;
+  showResolved: boolean;
+  onToggleShowResolved: () => void;
 }
 
 export function FindingsList(parent: HTMLElement, props: FindingsListProps): void {
@@ -35,18 +38,24 @@ export function FindingsList(parent: HTMLElement, props: FindingsListProps): voi
     if (items.length === 0) return;
     GroupHeader(parent, label, items.length, isRank1);
     const list = parent.createDiv({ cls: "bunsho-list" });
-    for (const item of items) FindingCard(list, { ...item, rank1: isRank1, dismissed: false });
+    for (const item of items) FindingCard(list, { ...item, rank1: isRank1 });
   };
   section("Open contradiction", rank1, true);
   section("Worth a look", lower, false);
 
-  if (props.dismissed.length > 0) {
+  if (props.resolved.length > 0) {
     const footer = parent.createDiv({ cls: "bunsho-footer" });
-    footer.createSpan({ text: `${props.dismissed.length} marked not an error \u00b7 ` });
-    TextAction(footer, { label: props.showDismissed ? "Hide" : "Show", onClick: props.onToggleShowDismissed });
-    if (props.showDismissed) {
-      const list = parent.createDiv({ cls: "bunsho-list" });
-      for (const item of props.dismissed) FindingCard(list, { ...item, rank1: false, dismissed: true });
+    footer.createSpan({ text: `${props.resolved.length} resolved this session \u00b7 ` });
+    TextAction(footer, { label: props.showResolved ? "Hide" : "Show", plain: true, onClick: props.onToggleShowResolved });
+    if (props.showResolved) {
+      const list = parent.createDiv({ cls: "bunsho-list bunsho-resolved" });
+      for (const item of props.resolved) {
+        const row = list.createDiv({ cls: "bunsho-card bunsho-resolved-row" });
+        row.createSpan({ cls: "bunsho-claim bunsho-resolved-claim", text: item.claim });
+        const end = row.createSpan({ cls: "bunsho-actions" });
+        Fact(end, item.status, "bunsho-resolved-status");
+        TextAction(end, { label: "Restore", quiet: true, onClick: item.onRestore });
+      }
     }
   }
 }

@@ -134,7 +134,7 @@ describe("one review at a time", () => {
     const { controller } = await setup({ notes, host: { pickSource: () => { picked = true; return Promise.resolve(null); } } });
     await withConfirmedPlan(controller);
     const run = controller.check();
-    while (controller.phase.kind !== "checking") await new Promise((done) => setTimeout(done, 5));
+    while (engine!.starts.length === 0) await new Promise((done) => setTimeout(done, 5));
     await controller.chooseSource();
     await controller.editPlan();
     expect(picked).toBe(false);
@@ -390,6 +390,16 @@ describe("saving", () => {
     await Promise.all([controller.dismiss("a", true), controller.dismiss("b", true), controller.dismiss("c", true)]);
     expect(most).toBe(1);
     expect(JSON.parse(writes[writes.length - 1])).toEqual(["a", "b", "c"]);
+  });
+
+  it("a finding marked deliberate is saved, can be restored, and an old data file still loads", async () => {
+    const { controller } = await setup({ notes: { "Book/a.md": "One." }, data: { deliberate: "broken" } });
+    expect(controller.data.deliberate).toEqual([]);
+    await controller.markDeliberate("a", true);
+    await controller.markDeliberate("b", true);
+    expect(controller.data.deliberate).toEqual(["a", "b"]);
+    await controller.markDeliberate("a", false);
+    expect(controller.data.deliberate).toEqual(["b"]);
   });
 
   it("a failed write does not block the next one", async () => {
