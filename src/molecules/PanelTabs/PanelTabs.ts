@@ -5,7 +5,7 @@ export function PanelTabs<T extends string>(parent: HTMLElement, { tabs, active,
   const row = parent.createDiv({ cls: `bunsho-tabs ${cls}`.trim(), attr: { role: "tablist" } });
   for (const tab of tabs) {
     const selected = tab.id === active;
-    const button = row.createEl("button", { cls: `bunsho-tab${selected ? " is-active" : ""}`, text: tab.label, attr: { role: "tab", "aria-selected": String(selected) } });
+    const button = row.createEl("button", { cls: `bunsho-tab${selected ? " is-active" : ""}`, text: tab.label, attr: { role: "tab", "aria-selected": String(selected), "data-focus-key": `tab:${tab.id}` } });
     button.onclick = () => onSelect(tab.id);
   }
   return row;

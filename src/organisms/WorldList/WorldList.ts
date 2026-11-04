@@ -16,9 +16,14 @@ export interface WorldListProps {
   expanded: ReadonlySet<string>;
   /** Entities whose earlier values are showing. */
   history: ReadonlySet<string>;
-  isStale: (row: WorldRow) => boolean;
+  /** What the check could not read, so the writer is not misled by a gap. */
+  gaps: readonly string[];
+  /** Why a fact may no longer match the story, or null. */
+  factNote: (row: WorldRow) => string | null;
   onFilter: (filter: WorldFilter) => void;
+  /** Records the text only: this list redraws its own results, so the field keeps the writer's cursor and any IME composition. */
   onSearch: (search: string) => void;
+  onComposing: (composing: boolean) => void;
   onToggle: (entityId: string) => void;
   onToggleHistory: (entityId: string) => void;
   onGo: (row: WorldRow) => void;
@@ -39,13 +44,14 @@ function renderRow(parent: HTMLElement, row: WorldRow, props: WorldListProps): v
   const quote = box.createDiv({ cls: "bunsho-passage bunsho-quote", text: row.quote, attr: { role: "button", tabindex: "0", "aria-label": `Go to the passage: ${row.quote}` } });
   quote.onclick = () => props.onGo(row);
   quote.onkeydown = (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); props.onGo(row); } };
-  if (props.isStale(row)) Fact(box, "edited since the check");
+  const note = props.factNote(row);
+  if (note) Fact(box, note);
 }
 
 function renderCard(parent: HTMLElement, entity: WorldEntity, props: WorldListProps): void {
   const open = props.expanded.has(entity.id);
   const card = parent.createDiv({ cls: "bunsho-card bunsho-world-card" });
-  const head = card.createEl("button", { cls: "bunsho-world-head", attr: { "aria-expanded": String(open) } });
+  const head = card.createEl("button", { cls: "bunsho-world-head", attr: { "aria-expanded": String(open), "data-focus-key": `card:${entity.id}` } });
   head.onclick = () => props.onToggle(entity.id);
   head.createSpan({ cls: "bunsho-world-name", text: entity.name });
   if (entity.rows.length > 0) head.createSpan({ cls: "bunsho-fact", text: String(entity.rows.filter((r) => !r.earlier).length) });
@@ -55,7 +61,7 @@ function renderCard(parent: HTMLElement, entity: WorldEntity, props: WorldListPr
   const earlier = entity.rows.filter((r) => r.earlier);
   const showHistory = props.history.has(entity.id);
   for (const row of entity.rows) if (!row.earlier || showHistory) renderRow(card, row, props);
-  if (earlier.length > 0) TextAction(card.createDiv({ cls: "bunsho-world-more" }), { label: showHistory ? "Hide earlier" : `Show ${earlier.length} earlier`, quiet: true, onClick: () => props.onToggleHistory(entity.id) });
+  if (earlier.length > 0) TextAction(card.createDiv({ cls: "bunsho-world-more" }), { label: showHistory ? "Hide earlier" : `Show ${earlier.length} earlier`, quiet: true, onClick: () => props.onToggleHistory(entity.id) }).setAttr("data-focus-key", `more:${entity.id}`);
 }
 
 function renderPills(parent: HTMLElement, entities: WorldEntity[], props: WorldListProps): void {
@@ -65,19 +71,42 @@ function renderPills(parent: HTMLElement, entities: WorldEntity[], props: WorldL
   const pills = parent.createDiv({ cls: "bunsho-world-pills" });
   const showAll = props.expanded.has("__mentioned__") || props.search.trim().length > 0;
   for (const entity of showAll ? closed : closed.slice(0, VISIBLE_PILLS)) {
-    pills.createEl("button", { cls: "bunsho-world-pill", text: entity.name }).onclick = () => props.onToggle(entity.id);
+    pills.createEl("button", { cls: "bunsho-world-pill", text: entity.name, attr: { "data-focus-key": `pill:${entity.id}` } }).onclick = () => props.onToggle(entity.id);
   }
   if (!showAll && closed.length > VISIBLE_PILLS) {
-    pills.createEl("button", { cls: "bunsho-world-pill is-more", text: `+${closed.length - VISIBLE_PILLS}` }).onclick = () => props.onToggle("__mentioned__");
+    pills.createEl("button", { cls: "bunsho-world-pill is-more", text: `+${closed.length - VISIBLE_PILLS}`, attr: { "data-focus-key": "pill:more" } }).onclick = () => props.onToggle("__mentioned__");
   }
 }
 
 export function WorldList(parent: HTMLElement, props: WorldListProps): void {
   const count = (filter: WorldFilter) => filterWorld(props.entities, filter, "").length;
   PanelTabs(parent, { cls: "is-filter", active: props.filter, onSelect: props.onFilter, tabs: FILTERS.map((f) => ({ id: f.id, label: `${f.label} ${count(f.id)}` })) });
+  if (props.gaps.length > 0) {
+    const named = props.gaps.slice(0, 3).join(", ");
+    const more = props.gaps.length > 3 ? ` and ${props.gaps.length - 3} more` : "";
+    parent.createDiv({ cls: "bunsho-problem bunsho-note", text: `Not in this list, because the check could not read it: ${named}${more}` });
+  }
   const search = parent.createEl("input", { cls: "bunsho-world-search", type: "search", value: props.search, placeholder: "Search this list", attr: { "aria-label": "Search this list" } });
-  search.oninput = () => props.onSearch(search.value);
+  const results = parent.createDiv();
+  const draw = () => {
+    results.empty();
+    renderResults(results, { ...props, search: search.value });
+  };
+  search.oninput = (event) => {
+    if ((event as InputEvent).isComposing) return; // the text is not final until the IME commits it
+    props.onSearch(search.value);
+    draw();
+  };
+  search.addEventListener("compositionstart", () => props.onComposing(true));
+  search.addEventListener("compositionend", () => {
+    props.onSearch(search.value);
+    draw();
+    props.onComposing(false);
+  });
+  draw();
+}
 
+function renderResults(parent: HTMLElement, props: WorldListProps): void {
   const shown = filterWorld(props.entities, props.filter, props.search);
   if (shown.length === 0) {
     const copy = FILTERS.find((f) => f.id === props.filter);

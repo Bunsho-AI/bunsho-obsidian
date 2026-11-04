@@ -26,6 +26,26 @@ describe("projectWorld", () => {
     expect(rowsOf(mira)).toEqual(["Eye colour: green"]);
   });
 
+  it("reads a page's facts in passage order, as a read merges two passes out of order", () => {
+    const later = fact(0, "Mira", "the garden", "location", { span: { start: 900, end: 910 } });
+    const sooner = fact(0, "Mira", "the cellar", "location", { span: { start: 100, end: 110 } });
+    const [mira] = projectWorld([member("m", "Mira", [0])], [read(0, [later, sooner])]);
+    expect(mira.rows.map((r) => [r.value, r.earlier])).toEqual([["the cellar", true], ["the garden", false]]);
+    const eyes = [fact(0, "Mira", "brown", "appearance:eye_color", { span: { start: 900, end: 910 } }), fact(0, "Mira", "green", "appearance:eye_color", { span: { start: 100, end: 110 } })];
+    expect(rowsOf(projectWorld([member("m", "Mira", [0])], [read(0, eyes)])[0])).toEqual(["Eye colour: green"]);
+  });
+
+  it("treats an unfiled attribute named like a changing state as changing, as the desktop does", () => {
+    const facts = [fact(0, "Mira", "a limp", "other", { attribute: "injury" }), fact(1, "Mira", "healed", "other", { attribute: "injury", order: 1 })];
+    expect(projectWorld([member("m", "Mira", [0, 1])], [read(0, [facts[0]]), read(1, [facts[1]])])[0].rows).toHaveLength(2);
+  });
+
+  it("shows and searches every name the book gives them", () => {
+    const entities = projectWorld([member("m", "Mira", [0], { names: ["Mira", "the old captain"] })], []);
+    expect(entities[0].aliases).toEqual(["the old captain"]);
+    expect(filterWorld(entities, "people", "captain")).toHaveLength(1);
+  });
+
   it("records each change of what changes, and marks the earlier ones", () => {
     const reads = [read(0, [fact(0, "Mira", "the harbour", "location")]), read(1, [fact(1, "Mira", "The Harbour", "location")]), read(2, [fact(2, "Mira", "the inn", "location")])];
     const [mira] = projectWorld([member("m", "Mira", [0, 1, 2])], [reads[2], reads[0], reads[1]]);

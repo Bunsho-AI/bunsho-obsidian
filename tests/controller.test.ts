@@ -237,10 +237,84 @@ describe("the World tab", () => {
     await withConfirmedPlan(controller);
     await controller.check();
     const row = controller.worldEntities()![0].rows[0];
-    expect(controller.isStale(row)).toBe(false);
+    expect(controller.factNote(row)).toBeNull();
     notes["Book/a.md"] = "Her eyes were green, and more.";
     await controller.refreshScan();
-    expect(controller.isStale(row)).toBe(true);
+    expect(controller.factNote(row)).toBe("edited since the check");
+  });
+
+  it("says a fact's page was left out, not edited, when the writer unticks it later", async () => {
+    let excludeFirst = false;
+    const { controller } = await setup({ notes: { ...BOOK }, host: { reviewPlan: (r) => Promise.resolve(planOf(r, excludeFirst ? [r.items[0].id] : [])) } });
+    await withConfirmedPlan(controller);
+    await controller.check();
+    const row = controller.worldEntities()![0].rows[0];
+    excludeFirst = true;
+    await controller.editPlan();
+    expect(controller.factNote(row)).toBe("left out of the reading plan since the check");
+  });
+
+  it("signing out during a check keeps nothing, and leaves the panel free", async () => {
+    const { controller, stored, data } = await setup({ notes: { ...BOOK } });
+    await withConfirmedPlan(controller);
+    const run = controller.check();
+    while (controller.phase.kind !== "checking") await new Promise((done) => setTimeout(done, 5));
+    await controller.signOut();
+    await run;
+    expect(stored.has("plugins/bunsho/world.json")).toBe(false);
+    expect((data() as PluginData).lastReview).toBeNull();
+    expect(controller.worldEntities()).toBeNull();
+    expect(controller.phase.kind).toBe("idle");
+  });
+
+  it("still removes the file when signing out fails partway", async () => {
+    const { controller, stored } = await setup({ notes: { ...BOOK } });
+    await withConfirmedPlan(controller);
+    await controller.check();
+    const tokens = (controller as unknown as { tokens: { signOut(): Promise<void> } }).tokens;
+    tokens.signOut = () => Promise.reject(new Error("keychain"));
+    await expect(controller.signOut()).rejects.toThrow("keychain");
+    expect(stored.has("plugins/bunsho/world.json")).toBe(false);
+  });
+
+  it("does not show an older World under a newer check of the same text", async () => {
+    const first = await setup({ notes: { ...BOOK } });
+    await withConfirmedPlan(first.controller);
+    await first.controller.check();
+    const saved = first.data() as PluginData;
+    const stored = [...first.stored];
+    await engine!.close();
+    const newer = { ...saved, lastReview: { ...saved.lastReview!, checkedAt: saved.lastReview!.checkedAt + 1000 } };
+    const second = await setup({ notes: { ...BOOK }, world: stored, data: newer as unknown as Record<string, unknown> });
+    expect(second.controller.worldEntities()).toBeNull();
+  });
+
+  it("names what the check could not read", async () => {
+    const first = await setup({ notes: { ...BOOK } });
+    await withConfirmedPlan(first.controller);
+    await first.controller.check();
+    expect(first.controller.worldGaps()).toEqual([]);
+    const saved = first.data() as PluginData;
+    const path = "plugins/bunsho/world.json";
+    const file = JSON.parse(first.stored.get(path)!) as { reads: unknown[] };
+    file.reads = file.reads.slice(1);
+    await engine!.close();
+    const second = await setup({ notes: { ...BOOK }, world: [[path, JSON.stringify(file)]], data: saved as unknown as Record<string, unknown> });
+    expect(second.controller.worldGaps()).toEqual(["a"]);
+  });
+
+  it("treats a damaged cast as no World, rather than breaking the panel", async () => {
+    const first = await setup({ notes: { ...BOOK } });
+    await withConfirmedPlan(first.controller);
+    await first.controller.check();
+    const saved = first.data() as PluginData;
+    const path = "plugins/bunsho/world.json";
+    for (const cast of [[null], [{ id: "x", names: 5 }], "nope"]) {
+      const file = { ...(JSON.parse(first.stored.get(path)!) as object), cast };
+      await engine!.close();
+      const second = await setup({ notes: { ...BOOK }, world: [[path, JSON.stringify(file)]], data: saved as unknown as Record<string, unknown> });
+      expect(second.controller.worldEntities()).toBeNull();
+    }
   });
 
   it("shows nothing for a different source, and returns when it is picked again", async () => {
@@ -263,7 +337,7 @@ describe("the World tab", () => {
     const saved = first.data() as Record<string, unknown>;
     const path = "plugins/bunsho/world.json";
     await engine!.close();
-    const other = await setup({ notes: { ...BOOK }, world: [[path, JSON.stringify({ version: 1, snapshotId: "other", reads: [], cast: [] })]], data: saved });
+    const other = await setup({ notes: { ...BOOK }, world: [[path, JSON.stringify({ version: 1, checkedAt: 1, reads: [], cast: [] })]], data: saved });
     expect(other.controller.worldEntities()).toBeNull();
     await engine!.close();
     const damaged = await setup({ notes: { ...BOOK }, world: [[path, "{not json"]], data: saved });

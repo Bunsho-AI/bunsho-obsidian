@@ -119,14 +119,15 @@ export function projectWorld(cast: readonly CastMember[], reads: readonly Chapte
   const displayName = (member: CastMember): string => member.properNames[0] ?? member.name;
   const rows = new Map<string, Map<string, WorldRow[]>>(); // member id -> dimension -> rows in story order
   for (const read of sorted) {
-    for (const fact of read.facts) {
+    // A read merges two passes, so its facts are not in passage order, and "first" and "current" depend on that order.
+    for (const fact of [...read.facts].sort((a, b) => a.span.start - b.span.start)) {
       if (!worldFact(fact)) continue;
       const dimension = fact.dimension as string;
       const member = resolve(fact.subject, read, personOnly(dimension) ? "character" : undefined);
       if (!member) continue;
       const filed = fileUnder(fact, member, (name) => resolve(name, read), displayName);
       if (!filed) continue;
-      const lasting = KNOWLEDGE.has(dimension) || (VOCABULARY[dimension]?.lasting ?? LASTING_KINDS.has(fact.kind));
+      const lasting = (VOCABULARY[filed.key] ?? VOCABULARY[filed.key.split(":")[0]])?.lasting ?? LASTING_KINDS.has(fact.kind);
       const buckets = rows.get(member.id) ?? new Map<string, WorldRow[]>();
       rows.set(member.id, buckets);
       const bucket = buckets.get(filed.key) ?? [];
@@ -145,7 +146,7 @@ export function projectWorld(cast: readonly CastMember[], reads: readonly Chapte
     const own = displayName(member);
     return {
       id: member.id, name: own, type: ENTITY_TYPE[member.kind], scenes, tier: tierOf(scenes),
-      aliases: [...new Map(member.properNames.filter((name) => nameKey(name) !== nameKey(own)).map((name) => [nameKey(name), name])).values()],
+      aliases: [...new Map(memberNames(member).filter((name) => nameKey(name) && nameKey(name) !== nameKey(own)).map((name) => [nameKey(name), name])).values()],
       rows: [...(rows.get(member.id)?.values() ?? [])].flat(),
     };
   }).sort((a, b) => b.scenes - a.scenes || a.name.localeCompare(b.name));

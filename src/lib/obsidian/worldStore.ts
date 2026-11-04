@@ -3,12 +3,12 @@
  * book. Only the file's shape is trusted, so an old or hand-edited file reads as nothing rather than breaking the panel.
  */
 import type { App } from "obsidian";
-import { validChapterRead } from "@/lib/contract/pipelineV3Frames";
+import { parseCastMembers, validChapterRead } from "@/lib/contract/pipelineV3Frames";
 import type { CastMember, ChapterRead } from "@/lib/contract/pipelineV3.types";
 
 export interface WorldData {
-  /** The review these reads belong to. */
-  snapshotId: string;
+  /** The review these reads belong to (its `checkedAt`). The text alone cannot say: a re-check of unchanged text has the same snapshot. */
+  checkedAt: number;
   reads: ChapterRead[];
   cast: CastMember[];
 }
@@ -22,8 +22,9 @@ export async function readWorld(app: App, dir: string): Promise<WorldData | null
     const path = pathIn(dir);
     if (!(await app.vault.adapter.exists(path))) return null;
     const raw = JSON.parse(await app.vault.adapter.read(path)) as Partial<WorldData> & { version?: unknown };
-    if (raw.version !== VERSION || typeof raw.snapshotId !== "string" || !Array.isArray(raw.reads) || !Array.isArray(raw.cast)) return null;
-    return { snapshotId: raw.snapshotId, reads: raw.reads.filter(validChapterRead), cast: raw.cast };
+    const cast = parseCastMembers(raw.cast);
+    if (raw.version !== VERSION || typeof raw.checkedAt !== "number" || !Array.isArray(raw.reads) || !cast) return null;
+    return { checkedAt: raw.checkedAt, reads: raw.reads.filter(validChapterRead), cast };
   } catch {
     return null;
   }
