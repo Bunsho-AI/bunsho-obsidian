@@ -29,7 +29,7 @@ function fakeEditor(notes: Record<string, string>, path: string, cursor: number)
   return editor;
 }
 
-async function setup(options: { notes?: Record<string, string>; engine?: Parameters<typeof startMockEngine>[0]; stored?: Map<string, string>; failSceneWrite?: () => boolean } = {}) {
+async function setup(options: { notes?: Record<string, string>; engine?: Parameters<typeof startMockEngine>[0]; stored?: Map<string, string>; failSceneWrite?: () => boolean; source?: { kind: "folder" | "note"; path: string } } = {}) {
   const notes = options.notes ?? BOOK();
   engine = engine ?? await startMockEngine({ balance: 100_000, tickMs: 1, ...options.engine });
   const stored = options.stored ?? new Map<string, string>();
@@ -56,10 +56,10 @@ async function setup(options: { notes?: Record<string, string>; engine?: Paramet
       },
       read: (file: { path: string }) => Promise.resolve(notes[file.path]),
     },
-    workspace: { getLeavesOfType: (type: string) => (type === "markdown" ? views : []), getActiveFile: () => (active ? { path: active } : null) },
+    workspace: { getLeavesOfType: (type: string) => (type === "markdown" ? views : []), getActiveFile: () => (active ? { path: active } : null), getMostRecentLeaf: () => views.at(-1) ?? null },
     metadataCache: { getFileCache: () => null },
   };
-  let data: unknown = { engineUrl: `http://127.0.0.1:${engine.port}`, devUid: "test", source: { kind: "folder", path: "Book" }, workspaceId: "w", installId: "i" };
+  let data: unknown = { engineUrl: `http://127.0.0.1:${engine.port}`, devUid: "test", source: options.source ?? { kind: "folder", path: "Book" }, workspaceId: "w", installId: "i" };
   const continuity = new ContinuityController({
     app: app as never, version: "0.1.0", dir: "plugins/bunsho", loadData: () => Promise.resolve(data), saveData: (next: PluginData) => { data = next; return Promise.resolve(); },
     openPanel: () => Promise.resolve(), changed: () => undefined, confirmCheck: () => Promise.resolve("check"),
@@ -181,10 +181,24 @@ describe("what a failure says", () => {
     expect(engine!.directorCharged()).toBe(33);
     ok(await made.director.plan("Retry me.", anchor));
     expect(calls("/v1/plan")[2].key).not.toBe(first.key);
+    // A failure with the engine's own figure is settled: the next press is a new attempt.
     engine!.options.directorFail = { status: 500, charged: 0, once: true };
     await made.director.plan("Again.", anchor);
     ok(await made.director.plan("Again.", anchor));
-    expect(calls("/v1/plan")[4].key).toBe(calls("/v1/plan")[3].key);
+    expect(calls("/v1/plan")[4].key).not.toBe(calls("/v1/plan")[3].key);
+  });
+  it("a 5xx that names no charge keeps its key: the retry cannot start a second run, says so, and only the press after it starts a new charge", async () => {
+    const made = await setup();
+    const anchor = { itemId: made.itemOf("Book/a.md"), placement: "append" as const };
+    engine!.options.directorFail = { status: 503, once: true };
+    expect(await made.director.plan("Ambiguous.", anchor)).toEqual({ ok: false, failure: { kind: "failed", charged: null } });
+    const balance = engine!.balance();
+    expect(await made.director.plan("Ambiguous.", anchor)).toEqual({ ok: false, failure: { kind: "failed", charged: null, replayed: true } });
+    expect(engine!.balance()).toBe(balance);
+    expect(calls("/v1/plan")[1].key).toBe(calls("/v1/plan")[0].key);
+    ok(await made.director.plan("Ambiguous.", anchor));
+    expect(calls("/v1/plan")[2].key).not.toBe(calls("/v1/plan")[0].key);
+    expect(engine!.balance()).toBe(balance - 33);
   });
   it("an answer a card cannot be built from is a failure, not a card", async () => {
     const made = await setup();
@@ -268,6 +282,21 @@ describe("Keep", () => {
     expect(made.processed).toEqual(["Book/a.md"]);
     expect(kept).toMatchObject({ ok: true, note: "Chapter wasn't open for editing, so this went straight into the file, and Undo cannot take it back." });
     expect(made.notes["Book/a.md"]).toContain("Beat 3 as prose");
+  });
+  it("written with the cursor outside the chapter continues from the whole chapter, and goes to its end", async () => {
+    const notes = { "Book/a.md": "# Notes\nResearch.\n# Two\nStory.\n# Three\nMore.\n" };
+    const made = await setup({ notes, source: { kind: "note", path: "Book/a.md" } });
+    made.open("Book/a.md", notes["Book/a.md"].indexOf("Research"));
+    const { scan } = made.continuity;
+    if (scan.status !== "ready") throw new Error("no scan");
+    const two = scan.items.find((item) => item.label === "Two")!;
+    const anchor = { itemId: two.id, placement: "cursor" as const };
+    const card = ok(await made.director.plan("Into two.", anchor));
+    expect(calls("/v1/plan")[0].body.precedingProse).toBe(two.text);
+    const scene = ok(await made.director.write({ sceneId: card.sceneId, anchor }));
+    expect(scene.mark).toBeUndefined();
+    await keep(made, scene.sceneId);
+    expect(notes["Book/a.md"]).toMatch(/^# Notes\nResearch\.\n# Two\nStory\.\n\nBeat 1[^#]*\n\n# Three\nMore\.\n$/u);
   });
   it("into a note in reading view goes through the file, whose editor nothing saves, and says there is no undo", async () => {
     const made = await setup();
@@ -378,6 +407,25 @@ describe("where scenes live", () => {
     expect(fresh.scenes.map((s) => s.sceneId)).toEqual([scene.sceneId]);
     expect(fresh.scenes[0]).toEqual(scene);
     expect(made.stored.get("plugins/bunsho/scenes/sc_broken.json")).toBe("{not json");
+  });
+  it("one file that cannot be read hides nothing else, and its name stays taken", async () => {
+    const made = await setup();
+    const scene = await drafted(made);
+    const app = (made.continuity as unknown as { host: { app: { vault: { adapter: { read: (path: string) => Promise<string> } } } } }).host.app;
+    made.stored.set("plugins/bunsho/scenes/sc_unreadable.json", "x");
+    const read = app.vault.adapter.read;
+    app.vault.adapter.read = (path) => (path.includes("sc_unreadable") ? Promise.reject(new Error("locked")) : read(path));
+    const fresh = new DirectorController(app as never, made.continuity, () => undefined);
+    await fresh.whenLoaded();
+    expect(fresh.scenes.map((s) => s.sceneId)).toEqual([scene.sceneId]);
+    expect(made.stored.get("plugins/bunsho/scenes/sc_unreadable.json")).toBe("x");
+    app.vault.adapter.read = read;
+  });
+  it("a kept scene lets go of the manuscript text its draft held", async () => {
+    const made = await setup();
+    const scene = await drafted(made);
+    await keep(made, scene.sceneId);
+    expect(JSON.stringify(JSON.parse(made.stored.get(`plugins/bunsho/scenes/${scene.sceneId}.json`)!))).not.toContain("precedingTail");
   });
   it("a write a crash interrupted is finished on the next read", async () => {
     const made = await setup();

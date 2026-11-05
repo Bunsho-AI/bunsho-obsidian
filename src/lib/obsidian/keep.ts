@@ -44,8 +44,11 @@ export async function placeInNote(app: App, path: string, decide: (text: string)
     const at = editor.offsetToPos(plan.offset);
     // One transaction is one undo step. No selection: the writer's cursor stays theirs, and is never replaced.
     editor.transaction({ changes: [{ from: at, text: plan.text }] });
-    const start = editor.offsetToPos(plan.offset + plan.text.length - plan.text.trimStart().length);
-    editor.scrollIntoView({ from: start, to: start }, true);
+    // Placed by now: nothing about showing it may read as a failure.
+    try {
+      const start = editor.offsetToPos(plan.offset + plan.text.length - plan.text.trimStart().length);
+      editor.scrollIntoView({ from: start, to: start }, true);
+    } catch (error) { console.warn("[Bunsho] could not scroll to the kept scene", error); }
     return { kind: "placed", plan, undoable: true };
   }
   let result: PlaceResult = { kind: "already" };

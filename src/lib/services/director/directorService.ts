@@ -1,7 +1,8 @@
 /**
  * The engine's Director routes: plain JSON over requestUrl, with the writer's token. Every call is metered, so every call carries an idempotency key. The key belongs to the attempt, the
- * same request sent again: a timeout, a lost connection or a 5xx is ambiguous, because the engine may have charged and done the work, so the key is kept and a retry pays once. A 2xx or
- * 4xx ends the attempt. Keys last the session, as on the desktop.
+ * same request sent again. A timeout, a lost connection or a 5xx that names no charge is ambiguous: the key is kept, so a retry gets the first answer if the engine still holds it, and
+ * cannot start a second run under that key. If it no longer holds it, the engine refuses (ReplayUnavailable below): that key is done, and only pressing again, at the price on the
+ * button, starts a new charge. A 2xx, a 4xx, or a 5xx with the engine's own charge figure ends the attempt. Keys last the session, as on the desktop.
  */
 import { parsePlanResponse, parseRenderBeat, parseRenderScene, type EnginePlanRequest, type EnginePlanResponse, type EngineRenderBeatRequest, type EngineRenderBeatResponse, type EngineRenderSceneRequest, type EngineRenderSceneResponse } from "@/lib/contract/director.types";
 import { EngineRequestError, postMetered, type ConnectionOptions } from "@/lib/services/engine/engineService";
@@ -12,6 +13,9 @@ const PLAN_TIMEOUT_MS = 120_000;
 const RENDER_BEAT_TIMEOUT_MS = 120_000;
 const RENDER_SCENE_TIMEOUT_MS = 300_000;
 const MAX_PENDING_ATTEMPTS = 200;
+
+/** The engine will not run this key again, and no longer holds its answer. The earlier try may have stayed charged. */
+export const REPLAY_UNAVAILABLE = "IDEMPOTENCY_REPLAY_UNAVAILABLE";
 
 /** The engine said something a card cannot be built from. It may have charged. */
 export class BadAnswerError extends Error {}
@@ -39,7 +43,7 @@ export class DirectorEngine {
       if (!parsed) throw new BadAnswerError(`The engine's answer on ${path} could not be read`);
       return parsed;
     } catch (error) {
-      if (error instanceof EngineRequestError && error.status < 500) this.attempts.delete(slot);
+      if (error instanceof EngineRequestError && (error.status < 500 || error.charged !== null)) this.attempts.delete(slot);
       throw error;
     }
   }

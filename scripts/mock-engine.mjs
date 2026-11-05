@@ -178,6 +178,7 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
   /** Set at start or through POST /__mock; each is what the real engine can do. */
   const directorCalls = [];
   const directorReplays = new Map();
+  const directorFailedKeys = new Set();
   let directorCharged = 0;
   const options = {
     /** { code, message, charged }: refuses after charging and after streaming its reads, as a failure mid-run does. */
@@ -238,6 +239,7 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
         if (problem) return reply(400, { statusCode: 400, message: problem });
         const held = directorReplays.get(key);
         if (held) return held.raw === raw ? reply(held.status, held.payload) : reply(422, { code: "IDEMPOTENCY_KEY_BODY_MISMATCH", message: "another body" });
+        if (directorFailedKeys.has(key)) return reply(409, { code: "IDEMPOTENCY_REPLAY_UNAVAILABLE", message: "That key has already run." });
         const finish = () => {
           const cost = OP_COSTS[route.op] * route.units(body);
           if (balance < cost) return reply(402, { code: "INSUFFICIENT_CREDITS", message: "Out of credits" });
@@ -245,6 +247,7 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
           if (failure) {
             if (failure.once) options.directorFail = null;
             if (failure.charged) balance -= failure.charged;
+            directorFailedKeys.add(key);
             return reply(failure.status ?? 500, { code: failure.code ?? "INTERNAL", message: "It failed", ...(failure.charged !== undefined ? { charged: failure.charged } : {}) });
           }
           balance -= cost;

@@ -7,7 +7,7 @@
  * discards, one previous card until written, hand edits are free and drop stale effects) are testable on their own.
  */
 import { countWords as wordsOf } from "@/lib/contract/countWords";
-import { parseBeatSheet, validSpans, type EngineBeat, type EngineBeatSheet, type EngineRenderSceneResponse, type EngineSceneRecordLine } from "@/lib/contract/director.types";
+import { parseBeatSheet, validBeat, validSpans, type EngineBeat, type EngineBeatSheet, type EngineRenderSceneResponse, type EngineSceneRecordLine } from "@/lib/contract/director.types";
 import { sha256 } from "@/utils/hash";
 import type { PlacementMark } from "@/helpers/director/placement";
 
@@ -398,6 +398,8 @@ export function applyKept(current: DirectorSceneRecord, pageId: string, nowIso: 
   delete next.previous;
   delete next.showingPrevious;
   delete next.mark;
+  // The prose it continued from is the manuscript's own, and no rewrite will need it now.
+  if (next.draft) next.draft = { text: next.draft.text, wordCount: next.draft.wordCount, spans: next.draft.spans };
   return next;
 }
 
@@ -429,7 +431,7 @@ export function keptInsertKey(sceneId: string, prose: string): string {
 
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 function parseDraft(value: unknown): SceneDraft | null {
-  if (!record(value) || typeof value.text !== "string" || typeof value.wordCount !== "number" || !validSpans(value.spans, value.text.length)) return null;
+  if (!record(value) || typeof value.text !== "string" || value.text.trim() === "" || typeof value.wordCount !== "number" || !validSpans(value.spans, value.text.length)) return null;
   return { text: value.text, wordCount: value.wordCount, spans: value.spans, ...(typeof value.precedingTail === "string" ? { precedingTail: value.precedingTail } : {}) };
 }
 function parseMark(value: unknown): PlacementMark | null {
@@ -446,6 +448,6 @@ export function parseSceneRecord(value: unknown): DirectorSceneRecord | null {
   if (value.kept !== undefined && !(record(value.kept) && typeof value.kept.pageId === "string" && typeof value.kept.keptAtIso === "string")) return null;
   if (value.direction !== undefined && typeof value.direction !== "string") return null;
   if (value.note !== undefined && typeof value.note !== "string") return null;
-  if (value.previous !== undefined && !(record(value.previous) && typeof value.previous.goal === "string" && Array.isArray(value.previous.beats))) return null;
+  if (value.previous !== undefined && !(record(value.previous) && typeof value.previous.goal === "string" && Array.isArray(value.previous.beats) && value.previous.beats.every(validBeat))) return null;
   return scene;
 }

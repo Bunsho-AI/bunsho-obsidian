@@ -54,10 +54,11 @@ function snap(raw: string, at: number): number {
 /** A projected offset as a place in the note. toSourceEnd keeps it before a removed heading mark, and snap carries it past a closing mark. */
 const boundaryAt = (raw: string, projection: Projection, offset: number): number => snap(raw, projection.toSourceEnd(offset));
 
-/** What a scene written at this cursor continues from and comes back to. `from`: where its chapter starts, in the projected note. */
-export function cursorContext(raw: string, cursor: number, from: number): { mark: PlacementMark; preceding: string } {
+/** What a scene written at this cursor continues from and comes back to, when the cursor is in the chapter [from, to] of the projected note. Null when it is elsewhere. */
+export function cursorContext(raw: string, cursor: number, from: number, to: number): { mark: PlacementMark; preceding: string } | null {
   const projection = projectMarkdown(raw);
-  const offset = Math.max(from, projection.fromSource(snap(raw, Math.min(cursor, raw.length))));
+  const offset = projection.fromSource(snap(raw, Math.min(cursor, raw.length)));
+  if (offset < from || offset > to) return null;
   return { mark: { offset, before: sha256(projection.text.slice(0, offset)) }, preceding: projection.text.slice(from, offset) };
 }
 

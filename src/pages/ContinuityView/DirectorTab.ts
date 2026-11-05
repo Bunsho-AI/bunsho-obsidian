@@ -9,12 +9,12 @@ import { directionOf, type DirectorSceneRecord, type EditedBeat } from "@/helper
 import { exampleDirection, FAILED_COPY, isKeptScene, layoutScenes, NO_CHAPTER, passagesOf, rowStatus, scenePageId, titleOf, writingStepMs, type DraftPassage, type NoteSlotKind, type SceneOp } from "@/helpers/director/sceneView";
 import type { EngineBeat } from "@/lib/contract/director.types";
 import { CardShape } from "@/molecules/CardShape";
-import { DraftFoot } from "@/molecules/DraftFoot";
 import type { SceneAnchorLineProps } from "@/molecules/SceneAnchorLine";
 import { SceneFailureLine } from "@/molecules/SceneFailureLine";
 import { SceneNoteSlot } from "@/molecules/SceneNoteSlot";
 import { EarlierScenesHead, SceneRow } from "@/molecules/SceneRow";
 import { DirectionBox, DirectionWell } from "@/organisms/DirectionBox";
+import { DraftFoot } from "@/organisms/DraftFoot";
 import { DirectorUpsell } from "@/organisms/DirectorUpsell";
 import { SceneCard, type BeatEditState, type SceneCardMode, type SceneCardNotice } from "@/organisms/SceneCard";
 import { SceneDraft } from "@/organisms/SceneDraft";
@@ -27,6 +27,8 @@ export interface DirectorTabHost {
 }
 
 const QUILL_TIER = "quill";
+/** The earlier try's answer is gone, and it may have stayed charged. Said because the next press is a new charge. */
+const REPLAYED = " That try may already have been charged, and pressing again is a new charge.";
 const NEEDS_FULL_REVIEW = "Check the whole manuscript first: a chapter can only be checked against a book Bunsho has read.";
 
 export class DirectorTab {
@@ -116,7 +118,7 @@ export class DirectorTab {
 
   private failureNotice(failure: SceneFailure, op: SceneOp, action: "Planning" | "Writing", needed: number | null): SceneCardNotice | null {
     if (failure.kind === "credits") return { kind: "outOfCredits", action, needed, balance: this.continuity.account.balance };
-    if (failure.kind === "failed") return { kind: "failed", message: FAILED_COPY[op], charged: failure.charged };
+    if (failure.kind === "failed") return { kind: "failed", message: `${FAILED_COPY[op]}${failure.replayed ? REPLAYED : ""}`, charged: failure.charged };
     return failure.message ? { kind: "failed", message: failure.message, charged: null } : null;
   }
 
@@ -135,7 +137,7 @@ export class DirectorTab {
     }
     const { failure } = result;
     if (failure.kind === "credits") this.planFailure = { message: "Out of credits. Nothing was charged.", charged: null };
-    else if (failure.kind === "failed") this.planFailure = { message: FAILED_COPY.plan, charged: failure.charged };
+    else if (failure.kind === "failed") this.planFailure = { message: `${FAILED_COPY.plan}${failure.replayed ? REPLAYED : ""}`, charged: failure.charged };
     else if (failure.message) this.planFailure = { message: failure.message, charged: null };
     this.host.redraw("direction:field");
   }
@@ -239,7 +241,7 @@ export class DirectorTab {
     if (!result.ok) {
       const { failure } = result;
       if (failure.kind === "credits") this.draftMessage = "Out of credits. Nothing was charged. The draft stays as it is.";
-      else if (failure.kind === "failed") this.draftMessage = `${FAILED_COPY.rewrite}${failure.charged === 0 ? " Nothing was charged." : failure.charged ? ` ${failure.charged.toLocaleString("en-US")} credits were charged.` : ""}`;
+      else if (failure.kind === "failed") this.draftMessage = `${FAILED_COPY.rewrite}${failure.replayed ? REPLAYED : ""}${failure.charged === 0 ? " Nothing was charged." : failure.charged ? ` ${failure.charged.toLocaleString("en-US")} credits were charged.` : ""}`;
       else if (failure.message) this.draftMessage = failure.message;
     }
     this.host.redraw(`rewrite:${passage.beatId}`);

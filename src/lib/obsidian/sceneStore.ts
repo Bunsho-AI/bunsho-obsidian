@@ -41,7 +41,8 @@ export async function listScenes(app: App, dir: string): Promise<SceneList> {
     if (!name.endsWith(".json") && !interrupted) continue;
     const id = name.replace(/\.json(\.tmp)?$/u, "");
     taken.add(id);
-    const scene = parse(await adapter.read(path));
+    let scene: DirectorSceneRecord | null = null;
+    try { scene = parse(await adapter.read(path)); } catch (error) { console.warn(`[Bunsho] could not read the scene ${id}`, error); }
     if (scene && scene.sceneId === id) scenes.push(scene); else damaged++;
   }
   scenes.sort((a, b) => (b.createdAtIso ?? b.sceneId).localeCompare(a.createdAtIso ?? a.sceneId));

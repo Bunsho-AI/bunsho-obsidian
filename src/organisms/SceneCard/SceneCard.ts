@@ -186,7 +186,9 @@ function drawFoot(card: HTMLElement, props: SceneCardProps, beatCount: number): 
   write.addClass("bunsho-priced");
   write.createSpan({ text: "Write scene" });
   if (writeLabel) write.createSpan({ cls: "bunsho-fact is-on-fill", text: writeLabel });
-  write.disabled = beatCount === 0 || tooLong || props.locked || writeLabel === null;
+  // A beat being added would be written and charged, and is not in the price on this button: it waits until the line is kept.
+  const adding = props.editing !== null && props.editing.beatId === undefined;
+  write.disabled = beatCount === 0 || tooLong || props.locked || writeLabel === null || adding;
   if (props.sceneSlot) { props.sceneSlot(foot); return; }
   const regenerate = actions.createEl("button", { cls: "bunsho-pen", attr: { "data-focus-key": "scene:regenerate" } });
   regenerate.createSpan({ text: "Regenerate scene" });

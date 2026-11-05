@@ -8,6 +8,7 @@ export interface PenFieldProps {
   focusKey: string;
   placeholder?: string;
   cls?: string;
+  maxLength?: number;
   onInput: (value: string) => void;
   onComposing?: (composing: boolean) => void;
   onEnter?: () => void;
@@ -15,7 +16,7 @@ export interface PenFieldProps {
 }
 
 export function PenField(parent: HTMLElement, props: PenFieldProps): HTMLInputElement {
-  const input = parent.createEl("input", { cls: `bunsho-pen-field${props.cls ? ` ${props.cls}` : ""}`, type: "text", value: props.value, placeholder: props.placeholder ?? "", attr: { "aria-label": props.label, "data-focus-key": props.focusKey } });
+  const input = parent.createEl("input", { cls: `bunsho-pen-field${props.cls ? ` ${props.cls}` : ""}`, type: "text", value: props.value, placeholder: props.placeholder ?? "", attr: { "aria-label": props.label, "data-focus-key": props.focusKey, ...(props.maxLength ? { maxlength: String(props.maxLength) } : {}) } });
   input.oninput = (event) => { if (!(event as InputEvent).isComposing) props.onInput(input.value); };
   input.addEventListener("compositionstart", () => props.onComposing?.(true));
   input.addEventListener("compositionend", () => { props.onInput(input.value); props.onComposing?.(false); });

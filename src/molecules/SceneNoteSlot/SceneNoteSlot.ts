@@ -18,7 +18,7 @@ export function SceneNoteSlot(parent: HTMLElement, props: SceneNoteSlotProps): v
   const slot = parent.createDiv({ cls: "bunsho-note-slot" });
   slot.createSpan({ cls: "bunsho-note-slot-title", text: copy.title });
   const label = price(props.price);
-  PenField(slot, { value: props.note, label: copy.title, focusKey: props.focusKey, placeholder: "A note, if you want one", onInput: props.onNote, onComposing: props.onComposing,
+  PenField(slot, { value: props.note, label: copy.title, focusKey: props.focusKey, placeholder: "A note, if you want one", maxLength: 1000, onInput: props.onNote, onComposing: props.onComposing,
     onEnter: () => { if (label) props.onSubmit(); }, onEscape: props.onCancel });
   if (copy.hint) slot.createSpan({ cls: "bunsho-small", text: copy.hint });
   const actions = slot.createDiv({ cls: "bunsho-note-slot-actions" });

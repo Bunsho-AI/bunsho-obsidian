@@ -16,7 +16,7 @@ import { placeInNote } from "@/lib/obsidian/keep";
 import { noteCursor } from "@/lib/obsidian/editor";
 import { listScenes, writeScene } from "@/lib/obsidian/sceneStore";
 import { AuthError } from "@/lib/services/auth/authService";
-import { DirectorEngine } from "@/lib/services/director/directorService";
+import { DirectorEngine, REPLAY_UNAVAILABLE } from "@/lib/services/director/directorService";
 import { EngineRequestError } from "@/lib/services/engine/engineService";
 
 /** The engine reads the last few thousand characters, and refuses a request past its 50,000-character limit. */
@@ -34,7 +34,7 @@ export type SceneFailure =
   /** The engine said 402. Nothing was charged. */
   | { kind: "credits" }
   /** `charged` is the engine's own figure, null when it did not say. */
-  | { kind: "failed"; charged: number | null };
+  | { kind: "failed"; charged: number | null; replayed?: boolean };
 export type SceneResult = { ok: true; scene: DirectorSceneRecord } | { ok: false; failure: SceneFailure };
 export type KeepResult = { ok: true; scene: DirectorSceneRecord; note: string | null } | { ok: false; message: string };
 
@@ -118,7 +118,7 @@ export class DirectorController {
   /** A paid answer shows even if the disk refuses it, until restart, and the writer is told. */
   private async keepScene(dir: string, scene: DirectorSceneRecord): Promise<void> {
     this.replace(scene);
-    try { await writeScene(this.app, dir, scene); } catch (error) {
+    try { await this.continuity.trackSceneWrite(writeScene(this.app, dir, scene)); } catch (error) {
       console.warn("[Bunsho] could not save a scene", error);
       new Notice("Bunsho could not save this scene to disk. It stays in the panel until Obsidian closes.");
     }
@@ -160,7 +160,7 @@ export class DirectorController {
       console.warn(`[Bunsho] Director engine call failed: ${error.status} ${error.code ?? ""}`);
       if (error.status === 402) return { kind: "credits" };
       if (error.status === 401) { await this.continuity.refreshAccount(); return { kind: "auth", message: AUTH_REQUIRED_MESSAGE }; }
-      return { kind: "failed", charged: error.charged };
+      return { kind: "failed", charged: error.charged, ...(error.code === REPLAY_UNAVAILABLE ? { replayed: true } : {}) };
     }
     console.warn("[Bunsho] Director action failed", errorMessage(error));
     return { kind: "failed", charged: null };
@@ -182,8 +182,9 @@ export class DirectorController {
     if (anchor.placement !== "cursor") return whole;
     const open = noteCursor(this.app, item.path);
     if (!open) return whole;
-    const { mark, preceding } = cursorContext(open.text, open.cursor, item.from);
-    if (mark.offset > item.from + item.text.length) return whole;
+    const at = cursorContext(open.text, open.cursor, item.from, item.from + item.text.length);
+    if (!at) return whole;
+    const { mark, preceding } = at;
     const page = [...pages].reverse().find((candidate) => candidate.noteOffset <= mark.offset) ?? pages[0];
     return { pageId: page.pageId, pageOrder: page.order, precedingProse: preceding.slice(-PRECEDING_PROSE_CHARS), mark, item };
   }
@@ -297,6 +298,7 @@ export class DirectorController {
     const current = this.scenes.find((s) => s.sceneId === sceneId);
     if (!current?.draft || isKept(current)) return { ok: false, message: "" };
     const dir = this.continuity.accountFolder();
+    const epoch = this.continuity.dataEpoch;
     const prose = current.draft.text;
     const itemId = current.anchor.pageId;
     const key = keptInsertKey(sceneId, prose);
@@ -315,15 +317,17 @@ export class DirectorController {
         this.placed.set(sceneId, key);
         if (result.kind === "placed") {
           const notes: string[] = [];
-          if (current.anchor.placement === "cursor" && result.plan.at === "end") notes.push(`The chapter was reopened since this scene was written, so it went at the end of ${chapter}.`);
-          if (result.plan.noteEnd && current.anchor.placement !== "cursor") notes.push(`${chapter} has changed in your plan since this scene was written, so it went at the end of that note.`);
+          if (result.plan.noteEnd) notes.push(`${chapter} has changed in your plan since this scene was written, so it went at the end of that note.`);
+          else if (current.anchor.placement === "cursor" && result.plan.at === "end") notes.push(`The chapter was reopened since this scene was written, so it went at the end of ${chapter}.`);
           if (!result.undoable) notes.push(`${chapter} wasn't open for editing, so this went straight into the file, and Undo cannot take it back.`);
           note = notes.length > 0 ? notes.join(" ") : null;
         }
       }
       try {
         const next = applyKept(current, itemId, new Date().toISOString());
-        await writeScene(this.app, dir, next);
+        // Deleted while it was being placed: what is in the note is the writer's, and there is nothing left to record it in.
+        if (this.continuity.dataEpoch !== epoch) return { ok: true, scene: next, note };
+        await this.continuity.trackSceneWrite(writeScene(this.app, dir, next));
         this.replace(next);
         // The check is offered once, for the scene just kept: an older, unanswered offer is let go. Best effort: the scene is kept by now.
         for (const other of this.scenes) {

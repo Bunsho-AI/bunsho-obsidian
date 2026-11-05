@@ -10,7 +10,7 @@ const place = (raw: string, over: Partial<PlanInsertInput> = {}) => {
   if (outcome.kind !== "insert") throw new Error("already placed");
   return { ...outcome.plan, result: raw.slice(0, outcome.plan.offset) + outcome.plan.text + raw.slice(outcome.plan.offset) };
 };
-const cursorPlace = (raw: string, cursor: number, edited = raw, from = 0, over: Partial<PlanInsertInput> = {}) => place(edited, { placement: "cursor", mark: cursorContext(raw, cursor, from).mark, ...over });
+const cursorPlace = (raw: string, cursor: number, edited = raw, from = 0, over: Partial<PlanInsertInput> = {}) => place(edited, { placement: "cursor", mark: cursorContext(raw, cursor, from, raw.length)!.mark, ...over });
 
 describe("the end of a chapter", () => {
   it("goes after the note's text, a blank line apart", () => {
@@ -72,9 +72,17 @@ describe("at the cursor", () => {
   it("sends what stands before the place, from the chapter's start", () => {
     const raw = "# A\nOne.\n# B\nTwo **more** words.\nThree.";
     const from = raw.indexOf("B") - 0;
-    const { preceding } = cursorContext(raw, raw.indexOf("more"), buildItems([{ ...note, text: raw }], whole).items[1].from);
+    const { preceding } = cursorContext(raw, raw.indexOf("more"), buildItems([{ ...note, text: raw }], whole).items[1].from, raw.length)!;
     expect(from).toBeGreaterThan(0);
     expect(preceding).toBe("B\nTwo more words.");
+  });
+  it("is nothing when the cursor is outside the chapter", () => {
+    const raw = "# A\nOne.\n# B\nTwo.\n# C\nThree.";
+    const items = buildItems([{ ...note, text: raw }], whole).items;
+    const b = items[1];
+    expect(cursorContext(raw, raw.indexOf("One"), b.from, b.from + b.text.length)).toBeNull();
+    expect(cursorContext(raw, raw.indexOf("Three"), b.from, b.from + b.text.length)).toBeNull();
+    expect(cursorContext(raw, raw.indexOf("Two"), b.from, b.from + b.text.length)).not.toBeNull();
   });
   it("still holds when only frontmatter or a comment changed", () => {
     const raw = "---\na: b\n---\nOne.\n\nTwo.";

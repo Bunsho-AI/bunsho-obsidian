@@ -1,6 +1,4 @@
 /** The Director's wire shapes (engine src/types/director.ts, one contract with it and with the desktop's engine.types.ts). */
-import type { EngineTracking } from "@/helpers/director/world";
-
 export interface EngineKnowledgeEffect { entityId: string; propositionKey: string; proposition: string; polarity: string; learnedHow?: string }
 export interface EngineStateEffect { entityId: string; dimension: string; value: string; stability: string; transition: string }
 
@@ -48,22 +46,23 @@ export interface EngineBeatSheet {
   createdAtIso?: string;
 }
 
+/** `tracking` is the bundle helpers/director/world.ts builds (engine TrackingFilesSchema). */
 export interface EnginePlanRequest {
   direction: string;
   targetPageId: string;
   pageOrder: number;
   precedingProse: string;
-  tracking: EngineTracking;
+  tracking: unknown;
   scene?: EngineBeatSheet;
   regenerate?: { note?: string };
   regenerateBeat?: { beatId: string; note?: string };
 }
 export interface EnginePlanResponse { scene: EngineBeatSheet; record: EngineSceneRecordLine[] }
 
-export interface EngineRenderSceneRequest { scene: EngineBeatSheet; tracking: EngineTracking; precedingProse: string }
+export interface EngineRenderSceneRequest { scene: EngineBeatSheet; tracking: unknown; precedingProse: string }
 export interface EngineRenderSceneResponse { text: string; wordCount: number; spans: { beatId: string; beatOrder: number; start: number; end: number }[] }
 
-export interface EngineRenderBeatRequest { scene: EngineBeatSheet; beatId: string; tracking: EngineTracking; precedingProse: string; followingProse?: string }
+export interface EngineRenderBeatRequest { scene: EngineBeatSheet; beatId: string; tracking: unknown; precedingProse: string; followingProse?: string }
 export interface EngineRenderBeatResponse { prose: string }
 
 /** The engine's price list keys (GET /v1/credits opCosts). */
@@ -74,7 +73,7 @@ const record = (value: unknown): value is Record<string, unknown> => Boolean(val
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every((s) => typeof s === "string");
 const optional = (value: unknown, type: "string" | "number"): boolean => value === undefined || typeof value === type;
 
-function validBeat(value: unknown): value is EngineBeat {
+export function validBeat(value: unknown): value is EngineBeat {
   return record(value) && typeof value.beatId === "string" && value.beatId.length > 0 && typeof value.order === "number" && typeof value.intent === "string" && optional(value.turn, "string")
     && (value.pacing === "flash" || value.pacing === "standard" || value.pacing === "expansive") && strings(value.entityIds) && Array.isArray(value.knowledgeEffects) && Array.isArray(value.stateEffects)
     && strings(value.directions) && typeof value.status === "string" && optional(value.renderedProse, "string") && optional(value.renderedRev, "string");

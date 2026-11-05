@@ -145,6 +145,7 @@ export class ContinuityController {
   private recordMemo: { world: WorldEntity[] | null; tracking: CanonTracking; pages: unknown; entities: RecordEntity[] } | null = null;
   private readsMemo: { world: WorldData; policy: string; pages: unknown; complete: boolean } | null = null;
   private worldWrites: Promise<void> = Promise.resolve();
+  private sceneWrites: Promise<unknown> = Promise.resolve();
   /** Bumped when what the panel is about changes hands: another account, deleted data, another book. Whatever a view holds for the old one goes. */
   scopeGeneration = 0;
   /** Bumped when the data here stops being what a running request was for: another account, or deleted data. A paid answer still arriving then goes nowhere near it. */
@@ -497,7 +498,7 @@ export class ContinuityController {
     this.scan = { status: "no_source" };
     this.phase = { kind: "idle" };
     this.host.changed();
-    await Promise.all([this.worldWrites, this.penWrites.catch(() => undefined), this.canonWrites.catch(() => undefined)]);
+    await Promise.all([this.worldWrites, this.sceneWrites.catch(() => undefined), this.penWrites.catch(() => undefined), this.canonWrites.catch(() => undefined)]);
     await removeWorld(this.app, dir);
     await removeCanon(this.app, dir);
     await removeScenes(this.app, dir);
@@ -952,6 +953,9 @@ export class ContinuityController {
     this.setPhase({ kind: "error", message: error instanceof Error ? error.message : "The check failed.", charged, ...(canRetry ? { action } : {}) });
     await this.refreshAccount();
   }
+
+  /** The Director's writes wait in line with the delete, as this controller's own do. */
+  trackSceneWrite<T>(write: Promise<T>): Promise<T> { this.sceneWrites = this.sceneWrites.catch(() => undefined).then(() => write); return write; }
 
   /** Where the signed-in account's own files are. */
   accountFolder(): string { return this.accountFiles(); }
