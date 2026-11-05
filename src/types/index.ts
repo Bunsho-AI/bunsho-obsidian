@@ -30,6 +30,8 @@ export interface PluginData {
   lastPlan: AccountOwned["lastPlan"];
   /** Whose findings, decisions, World and canon these are, as a hash. Null until an account signs in. */
   accountKey: string | null;
+  /** The vault folder that holds canon and Director scenes (lib/obsidian/vaultFolder.ts). It follows the writer's renames. */
+  dataFolder: string;
   /** The account whose files sit beside data.json. Any other's are under accounts/<key>/. */
   rootAccount: string | null;
   /** What other accounts left on this vault, kept whole for when they sign back in. */

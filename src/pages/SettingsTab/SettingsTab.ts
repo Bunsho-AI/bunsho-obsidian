@@ -19,8 +19,8 @@ export class SettingsTab extends PluginSettingTab {
         if (c.account.signedIn) await c.signOut(); else await c.signIn();
         this.display();
       }));
-    new Setting(containerEl).setName("Privacy").setDesc("The notes you choose are sent to the Bunsho service, over an encrypted connection, only when you confirm a check. While you are signed in, the plugin also reads your plan, your credit balance and the current price. The plugin sends no analytics. Your findings, what checks read and your canon stay on this machine when you sign out, ready for when you sign back in.");
-    new Setting(containerEl).setName("Delete my Bunsho data").setDesc("Removes your findings and decisions, what checks read, your canon and your reading plan from this vault's plugin folder. Your notes are not touched.")
+    new Setting(containerEl).setName("Privacy").setDesc("The notes you choose are sent to the Bunsho service, over an encrypted connection, only when you confirm a check. While you are signed in, the plugin also reads your plan, your credit balance and the current price. The plugin sends no analytics. Your findings, what checks read, your canon and your scenes stay on this machine when you sign out, ready for when you sign back in.");
+    new Setting(containerEl).setName("Delete my Bunsho data").setDesc("Removes your findings and decisions, what checks read, your canon, your Director scenes and your reading plan from this vault. Your notes are not touched.")
       .addButton((b) => {
         b.setButtonText("Delete my Bunsho data").onClick(async () => {
           if (!(await confirmDeleteData(this.app, c.holdsOtherAccounts()))) return;

@@ -398,39 +398,52 @@ describe("where scenes live", () => {
   it("one JSON per scene, reloaded as it was, and a damaged file is left alone with its name taken", async () => {
     const made = await setup();
     const scene = await drafted(made);
-    const path = `plugins/bunsho/scenes/${scene.sceneId}.json`;
+    const path = `Bunsho/scenes/${scene.sceneId}.json`;
     expect(JSON.parse(made.stored.get(path)!)).toMatchObject({ sceneId: scene.sceneId, direction: scene.direction });
-    made.stored.set("plugins/bunsho/scenes/sc_broken.json", "{not json");
-    made.stored.set("plugins/bunsho/scenes/sc_wrong.json", JSON.stringify({ ...scene, sceneId: "sc_other" }));
+    made.stored.set("Bunsho/scenes/sc_broken.json", "{not json");
+    made.stored.set("Bunsho/scenes/sc_wrong.json", JSON.stringify({ ...scene, sceneId: "sc_other" }));
     const fresh = new DirectorController((made.continuity as unknown as { host: { app: never } }).host.app, made.continuity, () => undefined);
     await fresh.whenLoaded();
     expect(fresh.scenes.map((s) => s.sceneId)).toEqual([scene.sceneId]);
     expect(fresh.scenes[0]).toEqual(scene);
-    expect(made.stored.get("plugins/bunsho/scenes/sc_broken.json")).toBe("{not json");
+    expect(made.stored.get("Bunsho/scenes/sc_broken.json")).toBe("{not json");
+  });
+  it("an earlier version's scenes in the plugin folder move to the vault at start", async () => {
+    const made = await setup();
+    const scene = await drafted(made);
+    const text = made.stored.get(`Bunsho/scenes/${scene.sceneId}.json`)!;
+    made.stored.delete(`Bunsho/scenes/${scene.sceneId}.json`);
+    made.stored.set(`plugins/bunsho/scenes/${scene.sceneId}.json`, text);
+    await made.continuity.load();
+    expect(made.stored.get(`Bunsho/scenes/${scene.sceneId}.json`)).toBe(text);
+    expect(made.stored.has(`plugins/bunsho/scenes/${scene.sceneId}.json`)).toBe(false);
+    const fresh = new DirectorController((made.continuity as unknown as { host: { app: never } }).host.app, made.continuity, () => undefined);
+    await fresh.whenLoaded();
+    expect(fresh.scenes.map((s) => s.sceneId)).toEqual([scene.sceneId]);
   });
   it("one file that cannot be read hides nothing else, and its name stays taken", async () => {
     const made = await setup();
     const scene = await drafted(made);
     const app = (made.continuity as unknown as { host: { app: { vault: { adapter: { read: (path: string) => Promise<string> } } } } }).host.app;
-    made.stored.set("plugins/bunsho/scenes/sc_unreadable.json", "x");
+    made.stored.set("Bunsho/scenes/sc_unreadable.json", "x");
     const read = app.vault.adapter.read;
     app.vault.adapter.read = (path) => (path.includes("sc_unreadable") ? Promise.reject(new Error("locked")) : read(path));
     const fresh = new DirectorController(app as never, made.continuity, () => undefined);
     await fresh.whenLoaded();
     expect(fresh.scenes.map((s) => s.sceneId)).toEqual([scene.sceneId]);
-    expect(made.stored.get("plugins/bunsho/scenes/sc_unreadable.json")).toBe("x");
+    expect(made.stored.get("Bunsho/scenes/sc_unreadable.json")).toBe("x");
     app.vault.adapter.read = read;
   });
   it("a kept scene lets go of the manuscript text its draft held", async () => {
     const made = await setup();
     const scene = await drafted(made);
     await keep(made, scene.sceneId);
-    expect(JSON.stringify(JSON.parse(made.stored.get(`plugins/bunsho/scenes/${scene.sceneId}.json`)!))).not.toContain("precedingTail");
+    expect(JSON.stringify(JSON.parse(made.stored.get(`Bunsho/scenes/${scene.sceneId}.json`)!))).not.toContain("precedingTail");
   });
   it("a write a crash interrupted is finished on the next read", async () => {
     const made = await setup();
     const scene = await drafted(made);
-    const path = `plugins/bunsho/scenes/${scene.sceneId}.json`;
+    const path = `Bunsho/scenes/${scene.sceneId}.json`;
     made.stored.set(`${path}.tmp`, made.stored.get(path)!);
     made.stored.delete(path);
     const fresh = new DirectorController((made.continuity as unknown as { host: { app: never } }).host.app, made.continuity, () => undefined);
@@ -440,7 +453,7 @@ describe("where scenes live", () => {
   it("keeps the replaced version beside it", async () => {
     const made = await setup();
     const scene = await drafted(made);
-    expect(made.stored.has(`plugins/bunsho/scenes/${scene.sceneId}.json.bak`)).toBe(true);
+    expect(made.stored.has(`Bunsho/scenes/${scene.sceneId}.json.bak`)).toBe(true);
   });
   it("another account sees none of them; they return with the first; Delete my Bunsho data removes all", async () => {
     const made = await setup();

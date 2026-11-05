@@ -3,7 +3,7 @@
  * (priced), writes the whole scene (priced per beat), rewrites one passage (priced), then keeps or discards. Only Keep reaches the page. Nothing here runs a check: it is offered after
  * Keep, and runs only when the writer asks.
  *
- * The engine is stateless: tracking and the scene travel with every request; the scene lives in the plugin's folder, what only this machine knows stripped before it travels.
+ * The engine is stateless: tracking and the scene travel with every request; the scene lives in the vault's Bunsho folder, what only this machine knows stripped before it travels.
  */
 import { Notice, type App } from "obsidian";
 import type { ContinuityController } from "@/controllers/ContinuityController";
@@ -74,7 +74,7 @@ export class DirectorController {
       this.scenes = list.scenes;
       this.taken = new Set(list.taken);
       this.loaded = true;
-      if (list.damaged > 0) new Notice(`Bunsho could not read ${list.damaged === 1 ? "one of your scenes" : `${list.damaged} of your scenes`}. The files were left as they are, in the scenes folder of the plugin's folder.`);
+      if (list.damaged > 0) new Notice(`Bunsho could not read ${list.damaged === 1 ? "one of your scenes" : `${list.damaged} of your scenes`}. The files were left as they are, in the scenes folder of the Bunsho folder in your vault.`);
       this.changed();
     }).catch((error: unknown) => {
       console.warn("[Bunsho] could not read the scenes", error);

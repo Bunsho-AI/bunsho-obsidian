@@ -35,6 +35,7 @@ import { removeScenes } from "@/lib/obsidian/sceneStore";
 import { seedTracking, projectPipelineV3World, type EngineTracking } from "@/helpers/director/world";
 import { rankCast, type DirectorCastMember } from "@/helpers/director/cast";
 import { BROKEN, readCanon, removeCanon, writeCanon, type CanonBook } from "@/lib/obsidian/canonStore";
+import { DATA_FOLDER, dataFolderOf, followFolder, moveToVault, removeIfEmpty } from "@/lib/obsidian/vaultFolder";
 import { SIGNED_OUT, type Account, type Phase, type PluginData, type ReviewAction, type Scan, type StoppedReview } from "@/types";
 import { formatNumber } from "@/utils/format";
 import { acceptableEngineUrl, isLocalEngine } from "@/utils/url";
@@ -99,7 +100,7 @@ type Executed =
 
 const NO_FULL_REVIEW = "Check the whole manuscript first: a chapter can only be checked against a book Bunsho has read.";
 /** Without the writer's pins a review would miss every canon conflict, and retire every canon card. */
-const CANON_UNREADABLE = `Bunsho could not read your canon, so a check could not hold your prose against it. You were not charged. A copy of the file was kept as ${BROKEN} in the plugin's folder: mend it, or remove your canon with Delete my Bunsho data.`;
+const CANON_UNREADABLE = `Bunsho could not read your canon, so a check could not hold your prose against it. You were not charged. A copy of the file was kept as ${BROKEN} in the Bunsho folder of your vault: mend it, or remove your canon with Delete my Bunsho data.`;
 const RECHECK_INCOMPLETE = "Recheck incomplete. Existing findings were preserved.";
 const NOT_DETECTED = "Issue no longer detected after targeted recheck.";
 
@@ -168,7 +169,7 @@ export class ContinuityController {
     const { manuscriptFolder, ...rest } = saved ?? {};
     this.data = {
       noteIds: {}, engineUrl: AUTH_CONFIG.engineUrl, devUid: "",
-      installId: crypto.randomUUID(), workspaceId: crypto.randomUUID(), ...NO_ACCOUNT_STATE, accountKey: null, rootAccount: null, otherAccounts: {}, ...rest,
+      installId: crypto.randomUUID(), workspaceId: crypto.randomUUID(), ...NO_ACCOUNT_STATE, accountKey: null, rootAccount: null, otherAccounts: {}, dataFolder: DATA_FOLDER, ...rest,
     };
     // Before the reading plan: the folder setting becomes the picked source, and a review from then cannot be mapped back.
     const folder = typeof manuscriptFolder === "string" ? manuscriptFolder.trim().replace(/^\/+|\/+$/gu, "") : "";
@@ -189,18 +190,31 @@ export class ContinuityController {
     this.data.rootAccount = key(this.data.rootAccount);
     // A vault's data.json can be synced or copied from elsewhere: never send a token to an address that is not ours to trust.
     if (!acceptableEngineUrl(this.data.engineUrl)) this.data.engineUrl = AUTH_CONFIG.engineUrl;
+    this.data.dataFolder = dataFolderOf(this.data.dataFolder, this.app.vault.configDir);
     await this.save();
     this.world = await readWorld(this.app, this.accountFiles());
+    await this.moveToVault();
     await this.loadCanon();
+  }
+
+  /** Canon and scenes kept in the plugin's folder by an earlier version move to the vault folder, once. */
+  private async moveToVault(): Promise<void> {
+    try {
+      const { moved, kept } = await moveToVault(this.app, this.host.dir, this.data.dataFolder);
+      if (kept > 0) new Notice(`Bunsho found canon or scenes in both the plugin's folder and the ${this.data.dataFolder} folder, with different text. Nothing was written over: the plugin folder's copies were left where they are.`);
+      else if (moved > 0) new Notice(`Bunsho moved your canon and scenes to the ${this.data.dataFolder} folder in your vault, so uninstalling the plugin no longer removes them.`);
+    } catch (error) {
+      console.warn("[Bunsho] could not move canon and scenes to the vault", error);
+    }
   }
 
   private async loadCanon(): Promise<void> {
     this.canonUnreadable = false;
     try {
-      const { books, damaged, unreadable } = await readCanon(this.app, this.accountFiles());
+      const { books, damaged, unreadable } = await readCanon(this.app, this.vaultFiles());
       this.canonBooks = books;
       this.canonUnreadable = unreadable;
-      if (damaged) new Notice(`Bunsho could not read all of your canon. A copy of the file was kept as ${BROKEN} in the plugin's folder.`);
+      if (damaged) new Notice(`Bunsho could not read all of your canon. A copy of the file was kept as ${BROKEN} in the ${this.data.dataFolder} folder.`);
     } catch (error) {
       console.warn("[Bunsho] could not read canon", error);
       this.canonBooks = [];
@@ -225,8 +239,10 @@ export class ContinuityController {
   get busy(): boolean { return this.phase.kind !== "idle" && this.phase.kind !== "error"; }
 
   private get app(): App { return this.host.app; }
-  /** Where the signed-in account's world.json and canon.json are. */
+  /** Where the signed-in account's world.json is: a cache of what checks read, in the plugin's folder. */
   private accountFiles(): string { return accountDir(this.host.dir, this.data); }
+  /** Where the signed-in account's canon and scenes are: the writer's own work, in the vault. */
+  private vaultFiles(): string { return accountDir(this.data.dataFolder, this.data); }
   private get devUid(): string | undefined { return isLocalEngine(this.data.engineUrl) && this.data.devUid ? this.data.devUid : undefined; }
 
   private connection(): ConnectionOptions {
@@ -258,6 +274,13 @@ export class ContinuityController {
     const { stopped } = this.data;
     const canonMoves = this.canonBooks.some((book) => follow(book.source) !== book.source);
     const heldKeys = Object.keys(this.data.otherAccounts);
+    const folder = followFolder(this.data.dataFolder, path, oldPath);
+    if (folder !== this.data.dataFolder) {
+      // The writer moved or renamed the Bunsho folder: it stays ours wherever it went, and the scenes are read from there.
+      this.data.dataFolder = dataFolderOf(folder, this.app.vault.configDir);
+      await this.save();
+      this.host.changed();
+    }
     const changes = canonMoves || heldKeys.length > 0 || holdsNoteId(this.data.noteIds, oldPath) || [this.data.source, this.reviewing, review?.source, stopped?.source].some((choice) => choice && follow(choice) !== choice);
     if (!changes) return;
     this.data.noteIds = moveNoteIds(this.data.noteIds, oldPath, path);
@@ -276,7 +299,7 @@ export class ContinuityController {
   }
 
   private async followHeldCanon(key: string, follow: (choice: SourceChoice) => SourceChoice): Promise<void> {
-    const dir = accountDir(this.host.dir, { accountKey: key, rootAccount: this.data.rootAccount });
+    const dir = accountDir(this.data.dataFolder, { accountKey: key, rootAccount: this.data.rootAccount });
     const { books, unreadable } = await readCanon(this.app, dir);
     if (unreadable || !books.some((book) => follow(book.source) !== book.source)) return;
     await writeCanon(this.app, dir, books.map((book) => ({ ...book, source: follow(book.source) })));
@@ -494,16 +517,21 @@ export class ContinuityController {
     this.scopeGeneration++;
     this.dataEpoch++;
     const dir = this.host.dir;
+    const folder = this.data.dataFolder;
     Object.assign(this.data, NO_ACCOUNT_STATE, { noteIds: {}, accountKey: null, rootAccount: null, otherAccounts: {} });
     this.scan = { status: "no_source" };
     this.phase = { kind: "idle" };
     this.host.changed();
     await Promise.all([this.worldWrites, this.sceneWrites.catch(() => undefined), this.penWrites.catch(() => undefined), this.canonWrites.catch(() => undefined)]);
     await removeWorld(this.app, dir);
-    await removeCanon(this.app, dir);
-    await removeScenes(this.app, dir);
-    const accounts = `${dir}/accounts`;
-    if (await this.app.vault.adapter.exists(accounts)) await this.app.vault.adapter.rmdir(accounts, true);
+    // Canon and scenes from an earlier version that could not be moved are the writer's too.
+    for (const place of [dir, folder]) { await removeCanon(this.app, place); await removeScenes(this.app, place); }
+    const { adapter } = this.app.vault;
+    if (await adapter.exists(`${dir}/accounts`)) await adapter.rmdir(`${dir}/accounts`, true);
+    if (await adapter.exists(`${folder}/accounts`)) {
+      for (const held of (await adapter.list(`${folder}/accounts`)).folders) { await removeCanon(this.app, held); await removeScenes(this.app, held); }
+    }
+    await removeIfEmpty(this.app, folder);
     await this.save();
     await this.refresh();
   }
@@ -958,7 +986,8 @@ export class ContinuityController {
   trackSceneWrite<T>(write: Promise<T>): Promise<T> { this.sceneWrites = this.sceneWrites.catch(() => undefined).then(() => write); return write; }
 
   /** Where the signed-in account's own files are. */
-  accountFolder(): string { return this.accountFiles(); }
+  /** Where this account's scenes are, in the vault. */
+  accountFolder(): string { return this.vaultFiles(); }
   connectionOptions(): ConnectionOptions { return this.connection(); }
   /** The notes as they are now. Throws when one cannot be read. */
   readScan(): Promise<Scan> { return this.freshScan(); }
@@ -1126,7 +1155,7 @@ export class ContinuityController {
 
   private saveCanon(): Promise<void> {
     if (this.canonUnreadable) return Promise.reject(new Error("canon.json could not be read"));
-    const dir = this.accountFiles();
+    const dir = this.vaultFiles();
     const books = this.canonBooks;
     const write = this.canonWrites.catch(() => undefined).then(() => writeCanon(this.app, dir, books));
     this.canonWrites = write;

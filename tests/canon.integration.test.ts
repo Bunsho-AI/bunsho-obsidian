@@ -10,7 +10,7 @@ import type { PluginData } from "@/types";
 let engine: Awaited<ReturnType<typeof startMockEngine>> | undefined;
 afterEach(async () => { await engine?.close(); engine = undefined; });
 
-const CANON = "plugins/bunsho/canon.json";
+const CANON = "Bunsho/canon.json";
 const BOOK = () => ({ "Book/a.md": "Mira came in.\nHer eyes were green.", "Book/b.md": "Mira left.\nHer eyes were green still.", "Book/c.md": "Nobody came." });
 
 async function setup(options: { notes?: Record<string, string>; failWrite?: () => boolean; stored?: Iterable<[string, string]>; data?: Record<string, unknown>; engine?: Parameters<typeof startMockEngine>[0] } = {}) {
@@ -84,6 +84,49 @@ describe("where canon lives", () => {
     expect(controller.canonTracking().entities.entities).toEqual([]);
   });
 
+  it("lives in the vault, not the plugin folder, so uninstalling the plugin leaves it", async () => {
+    const { controller, stored } = await checked();
+    await pinEyes(controller);
+    expect([...stored.keys()].some((key) => key.startsWith("plugins/bunsho/") && key.includes("canon"))).toBe(false);
+  });
+
+  it("an earlier version's canon in the plugin folder moves to the vault at start, and reads as before", async () => {
+    const { controller, stored, data } = await checked();
+    await pinEyes(controller);
+    const text = stored.get(CANON)!;
+    stored.delete(CANON);
+    stored.set("plugins/bunsho/canon.json", text);
+    const again = await setup({ stored, data: data() as unknown as Record<string, unknown> });
+    expect(again.stored.get(CANON)).toBe(text);
+    expect(again.stored.has("plugins/bunsho/canon.json")).toBe(false);
+    expect(rowOf(mira(again.controller), "Eye colour")).toMatchObject({ origin: "canon", value: "green" });
+  });
+
+  it("a canon already in the vault is never written over by the plugin folder's", async () => {
+    const { controller, stored, data } = await checked();
+    await pinEyes(controller);
+    const vault = stored.get(CANON)!;
+    stored.set("plugins/bunsho/canon.json", JSON.stringify({ version: 1, books: [] }));
+    const again = await setup({ stored, data: data() as unknown as Record<string, unknown> });
+    expect(again.stored.get(CANON)).toBe(vault);
+    expect(again.stored.get("plugins/bunsho/canon.json")).toBe(JSON.stringify({ version: 1, books: [] }));
+  });
+
+  it("follows the folder when the writer renames it, and a hand-edited name outside the vault is not trusted", async () => {
+    const { controller, stored, data } = await checked();
+    await pinEyes(controller);
+    const text = stored.get(CANON)!;
+    stored.delete(CANON);
+    stored.set("Writing/Bunsho/canon.json", text);
+    await controller.moved("Writing/Bunsho", "Bunsho");
+    expect(controller.data.dataFolder).toBe("Writing/Bunsho");
+    await controller.addEntity("Someone", "character", []);
+    expect(stored.get("Writing/Bunsho/canon.json")).toContain("Someone");
+    expect(stored.has(CANON)).toBe(false);
+    const hostile = await setup({ stored, data: { ...(data() as unknown as Record<string, unknown>), dataFolder: "../../elsewhere" } });
+    expect(hostile.controller.data.dataFolder).toBe("Bunsho");
+  });
+
   it("another account gets its own record, and the first's returns with it", async () => {
     const { controller, stored } = await checked();
     await pinEyes(controller);
@@ -131,7 +174,7 @@ describe("where canon lives", () => {
 
   it("a file it cannot read is kept, and no write or move can replace it", async () => {
     const { controller, stored } = await setup({ stored: [[CANON, "{not json"]] });
-    expect(stored.get("plugins/bunsho/canon.broken.json")).toBe("{not json");
+    expect(stored.get("Bunsho/canon.broken.json")).toBe("{not json");
     expect(controller.penOpen).toBe(false);
     expect(controller.canonProblem).toContain("canon.broken.json");
     expect(await controller.addEntity("Odile", "character", [])).toMatchObject({ success: false });
@@ -165,8 +208,8 @@ describe("where canon lives", () => {
     const first = await setup({ stored: [[CANON, "{one"]] });
     await engine!.close();
     const { stored } = await setup({ stored: [...first.stored, [CANON, "{two"]] });
-    expect(stored.get("plugins/bunsho/canon.broken.json")).toBe("{one");
-    expect(stored.get("plugins/bunsho/canon.broken-2.json")).toBe("{two");
+    expect(stored.get("Bunsho/canon.broken.json")).toBe("{one");
+    expect(stored.get("Bunsho/canon.broken-2.json")).toBe("{two");
     await engine!.close();
     const third = await setup({ stored });
     expect([...third.stored.keys()].filter((key) => key.includes("broken"))).toHaveLength(2);
@@ -216,7 +259,7 @@ describe("where canon lives", () => {
     const raw = JSON.stringify({ version: 1, books: [good, { source: 3 }] });
     const { controller, stored } = await setup({ stored: [[CANON, raw]] });
     expect(controller.canonTracking().entities.entities.map((e) => e.canonicalName)).toEqual(["A"]);
-    expect(stored.get("plugins/bunsho/canon.broken.json")).toBe(raw);
+    expect(stored.get("Bunsho/canon.broken.json")).toBe(raw);
   });
 
   it("finishes a write a crash interrupted", async () => {
