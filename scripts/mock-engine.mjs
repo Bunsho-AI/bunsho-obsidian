@@ -3,7 +3,8 @@
  * It speaks the real frame protocol: a strict start, every whole page and passages frame before it runs, and a charge from the
  * characters sent whole. It reports a contradiction when two chapters give different eye colours ("her eyes were green" ...
  * "her eyes were brown"), or call a boat two things ("the boat was red" ... "the boat was blue", a lower-ranked finding), citing
- * exact offsets in the text it received. Like the engine it keys a finding by what it cites, reads only pages it has no usable
+ * exact offsets in the text it received. A pinned eye colour is held against every page sent whole, as a canon_conflict.
+ * With `scope: "canon"` it does only that, at the canon price, and reads nothing. Like the engine it keys a finding by what it cites, reads only pages it has no usable
  * read for, and returns only findings touching the pages checked.
  *
  *   node scripts/mock-engine.mjs 8799 [--paid] [--other-project] [--enforce] [--balance N]
@@ -32,6 +33,40 @@ const GROUPS = /\b((?:[Tt]he )?[\p{Lu}][\p{L}]* Guild)\b/gu;
 const START_KEYS = new Set(["reviewId", "workspaceId", "snapshotId", "scope", "policyId", "readPolicyId", "pages", "cachedReads", "pins", "focusNames", "maxCredits"]);
 
 const sha = (text) => createHash("sha256").update(text).digest("hex");
+const PIN_KEYS = new Set(["pinId", "entityId", "entityName", "aliases", "dimension", "value", "declaredAt"]);
+export const MAX_PINS = 200;
+
+/** Why the engine's strict start schema would refuse these pins, or null. */
+function invalidPins(start) {
+  const pins = start.pins ?? [];
+  if (pins.length > MAX_PINS) return "too many pins";
+  if (new Set(pins.map((pin) => pin.pinId)).size !== pins.length) return "duplicate pin id";
+  if (pins.some((pin) => Object.keys(pin).some((key) => !PIN_KEYS.has(key)) || !pin.pinId || !pin.entityId || !pin.entityName || !Array.isArray(pin.aliases) || !pin.dimension || !pin.value || !pin.declaredAt)) return "bad pin";
+  return start.scope === "canon" && pins.length === 0 ? "a canon pass needs pins" : null;
+}
+
+/** A passage on a whole page that disagrees with a pin: filed on that page, citing only it, the pin riding along. */
+export function canonFindings(start, pages) {
+  const issues = [];
+  for (const pin of start.pins ?? []) {
+    for (const rule of RULES.filter((r) => r.dimension === pin.dimension && r.subject === pin.entityName)) {
+      for (const meta of [...start.pages].sort((a, b) => a.order - b.order)) {
+        if (!pages.has(meta.pageId)) continue;
+        for (const s of sentences(rule, pages.get(meta.pageId))) {
+          if (s.color === pin.value.trim().toLowerCase()) continue;
+          const key = `finding-${sha(["canon_conflict", pin.pinId, `${meta.pageId}:${s.quote}`].join("|")).slice(0, 24)}`;
+          issues.push({ issue_id: key, type: "canon_conflict", severity: "error", message: `You declared ${pin.value}, but this passage says ${s.color}.`, evidence_summary: `You declared ${pin.value}, but this passage says ${s.color}.`,
+            related_node_ids: [pin.entityId, pin.pinId], issue_confidence: 0.95,
+            context_json: JSON.stringify({ origin: "pipeline_v3", clusterKey: key, verification: "grounded_evidence", confidenceKind: "model_reported", findingType: "canon_conflict", subject: pin.entityName, policyId: start.policyId,
+              entityId: pin.entityId, dimension: pin.dimension, pinnedStateId: pin.pinId, pinnedValue: pin.value, declaredAt: pin.declaredAt }),
+            citations: [{ page_id: meta.pageId, page_order: meta.order, quoted_text: s.quote, location_label: `Chapter ${meta.order + 1}`, evidence_role: "current_conflict",
+              source_ref: { snapshotId: start.snapshotId, pageId: meta.pageId, rev: meta.rev, start: s.from, end: s.to } }] });
+        }
+      }
+    }
+  }
+  return issues;
+}
 
 /** Every sentence a rule matches in `text`, whose first character is `base` into the page. */
 function sentences(rule, text, base = 0) {
@@ -126,6 +161,10 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
     enforce,
     /** Answers GET /v1/billing/subscription with a failure. */
     subscriptionDown: false,
+    /** Pins left unjudged, and searches skipped: a canon pass that did not see everything. */
+    pinsDropped: 0, skipped: 0,
+    /** What the subscription read says the period ends on. */
+    renewsAt: null,
     failWith, tamper, tickMs, ...more,
   };
   let registration = registered; // { workspaceId, name } | null: the account's one free project
@@ -148,7 +187,7 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
     if (req.url === "/v1/credits") return json({ balance, plan: 0, extra: balance, total: balance });
     if (req.url === "/v1/billing/subscription") {
       if (options.subscriptionDown) { res.writeHead(503); return res.end(); }
-      return json({ active: options.paid, tier: options.paid ? options.tier : null, status: options.paid ? "active" : null, renewsAt: null, cancelAtPeriodEnd: false, pendingTier: null, pendingAppliesAt: null });
+      return json({ active: options.paid, tier: options.paid ? options.tier : null, status: options.paid ? "active" : null, renewsAt: options.renewsAt ?? null, cancelAtPeriodEnd: false, pendingTier: null, pendingAppliesAt: null });
     }
     const wire = () => registration && { workspaceId: registration.workspaceId, name: registration.name ?? null, registeredAt: "2026-10-31T00:00:00.000Z", revision: 1 };
     if (req.url === "/v1/projects/registration" && req.method === "GET") return json({ registration: wire() });
@@ -186,6 +225,7 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
         seenReviews.add(start.reviewId);
         if (start.scope !== "chapters" && start.pages.some((p) => p.send !== "whole")) return refuse("invalid_request", "That request was not valid. You were not charged.");
         if (options.refuseCached && start.cachedReads.length) return refuse("invalid_request", "That request was not valid. You were not charged.");
+        if (invalidPins(start)) return refuse("invalid_request", "That request was not valid. You were not charged.");
       }
       if (message.type === "page") {
         const meta = start?.pages.find((p) => p.pageId === message.payload.pageId);
@@ -209,8 +249,9 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
       }
       if (options.failWith) { socket.send(frame("error", { code: options.failWith, message: "The reading model is unavailable. You were not charged.", charged: false })); return socket.close(1011); }
       const chars = [...pages.values()].reduce((n, text) => n + text.length, 0);
-      const units = Math.max(3, Math.ceil(chars / 1000));
-      const credits = units * 12;
+      const canonPass = start.scope === "canon";
+      const units = Math.max(3, Math.ceil(chars / 1000)) + (canonPass ? 2 * start.pins.length : 0);
+      const credits = canonPass ? units : units * 12;
       if (start.maxCredits !== undefined && credits > start.maxCredits) return refuse("price_changed", "This review now costs more than the price you confirmed. Check the new price and try again. You were not charged.");
       if (options.enforce) {
         if (balance < credits) return refuse("insufficient_credits", "Not enough credits for this review. You were not charged.");
@@ -218,23 +259,23 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
       }
       socket.send(frame("accepted", { reviewId: start.reviewId, pages: start.pages.length, units, credits }));
       let step = 0;
-      const stages = ["read", "cast", "search", "triage", "judge", "timeline", "names", "assemble"];
+      const stages = canonPass ? ["canon", "assemble"] : ["read", "cast", "search", "triage", "judge", "timeline", "names", ...(start.pins?.length ? ["canon"] : []), "assemble"];
       const tick = setInterval(() => {
         if (step < stages.length) return socket.send(frame("progress", { stage: stages[step++], done: 1, total: 1 }));
         clearInterval(tick);
         const cachedAt = new Map(start.cachedReads.map((read) => [read.pageId, read.rev]));
-        const reads = readsOf(start, pages);
+        const reads = canonPass ? [] : readsOf(start, pages);
         // Sent before the error frame on a charged failure: what the review bought is kept. A usable read is not read again.
         for (const read of reads) if (cachedAt.get(read.pageId) !== read.rev) socket.send(frame("read", read));
         if (options.failAfterReads) { socket.send(frame("error", options.failAfterReads)); return socket.close(1011); }
-        const issues = options.findNothing ? [] : findings(start, pages, passages, start.cachedReads);
+        const issues = options.findNothing ? [] : [...(canonPass ? [] : findings(start, pages, passages, start.cachedReads)), ...canonFindings(start, pages)];
         const known = [...reads, ...start.cachedReads];
         const inBook = [...new Set(known.filter((read) => read.facts.length).map((read) => read.order))];
         const cast = inBook.length ? [{ id: "r0", name: "Mira", kind: "person", names: ["Mira"], properNames: ["Mira"], aliases: [], chapters: inBook, roles: [], introduced: [] }] : [];
         if (options.tamper) for (const issue of issues) issue.citations[options.tamper === "prior" ? 0 : 1].source_ref.end += 1; // cites text that was never sent
         const unreadPages = options.unread === "all" ? [...pages.keys()] : options.unread.filter((id) => pages.has(id));
         socket.send(frame("result", { reviewId: start.reviewId, policyId: start.policyId, readPolicyId: options.readPolicy ?? start.readPolicyId, issues, cast,
-          stats: { chapters: start.pages.length, chaptersRead: reads.length, cachedReads: start.cachedReads.length, ...(options.capped ? { shortlistDropped: 3 } : {}) }, ...(unreadPages.length ? { unreadPages, refundedCredits: 12 } : {}) }));
+          stats: { chapters: start.pages.length, chaptersRead: reads.length, cachedReads: start.cachedReads.length, ...(options.capped ? { shortlistDropped: 3 } : {}), ...(options.pinsDropped ? { canonPinsDropped: options.pinsDropped } : {}), ...(options.skipped ? { skippedJevRequests: options.skipped } : {}) }, ...(unreadPages.length ? { unreadPages, refundedCredits: 12 } : {}) }));
         if (!holdOpen) socket.close(1000); // holdOpen: leave closing to the client, as the real engine's timing can
       }, options.tickMs);
     });

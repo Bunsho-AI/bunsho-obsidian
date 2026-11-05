@@ -7,7 +7,9 @@
  * an edited sentence comes back with a new id; only adoption stops that reading as the old card having gone.
  */
 import type { PageMeta, SourceChoice } from "@/helpers/sources";
+import { CANON_CONFLICT_ISSUE_TYPE } from "@/helpers/canon/conflict";
 import type { EngineIssue } from "@/lib/contract/engine.types";
+import type { PipelineV3Pin } from "@/lib/contract/pipelineV3.types";
 import type { SourceReference } from "@/lib/contract/sourceReference";
 
 /** What this review read, in the writer's terms: never reading units. */
@@ -168,14 +170,22 @@ const flattenParagraphs = (text: string): string => text.replace(/\n/gu, " ");
  * What a sweep keeps and retires beyond retiring what was not re-derived when every cited chapter was checked: retire a finding
  * whose quote from a chapter checked in this sweep is no longer anywhere in that chapter's text, or that cites a chapter which no
  * longer exists. A finding whose quote is still there stays: a chapter check sees the rest of the book only through budgeted
- * passages, so not re-finding it proves nothing.
+ * passages, so not re-finding it proves nothing. Retire a canon_conflict finding whose pin is no longer active, or whose pin the
+ * writer has since edited (same id, another entity, dimension or value: its card and Revert would echo the old one).
  */
 export function pipelineV3PruneSets(clusters: readonly StoredClusterLike[], reproduced: ReadonlySet<string>,
-  checked: ReadonlySet<string>, current: ReadonlyMap<string, CurrentChapter>): { keep: string[]; stale: string[] } {
+  checked: ReadonlySet<string>, current: ReadonlyMap<string, CurrentChapter>, activePins: ReadonlyMap<string, Pick<PipelineV3Pin, "entityId" | "dimension" | "value">> = new Map()): { keep: string[]; stale: string[] } {
   const keep = new Set(reproduced);
   const stale: string[] = [];
   for (const cluster of clusters) {
     if (keep.has(cluster.clusterKey)) continue;
+    const context = cluster.context.rawContext ?? {};
+    const pin = typeof context.pinnedStateId === "string" ? activePins.get(context.pinnedStateId) : undefined;
+    if (cluster.type === CANON_CONFLICT_ISSUE_TYPE && typeof context.pinnedStateId === "string"
+      && (!pin || pin.entityId !== context.entityId || pin.dimension !== context.dimension || pin.value !== context.pinnedValue)) {
+      stale.push(cluster.clusterKey);
+      continue;
+    }
     // A quote can span a paragraph break; the flattened text still holds it.
     const outdated = cluster.evidence.some((item) => {
       const chapter = current.get(item.pageId);
@@ -244,6 +254,8 @@ export interface MergeInput {
   items: ReadonlyArray<{ id: string; label: string; included: boolean }>;
   /** Every page with text, as reviewed. */
   texts: ReadonlyMap<string, CurrentChapter>;
+  /** The writer's pins now. A canon card whose pin has gone or changed goes at the next sweep. */
+  activePins?: readonly PipelineV3Pin[];
 }
 
 export interface MergeResult {
@@ -307,7 +319,7 @@ export function mergeReview(input: MergeInput): MergeResult {
       current.set(page.pageId, { rev: "", text: textOf.get(page.pageId) ?? "" });
       if (parts.length > 0 && parts.every((p) => checked.has(p.pageId))) checked.add(page.pageId);
     }
-    const sets = pipelineV3PruneSets(clusters, survivors, checked, current);
+    const sets = pipelineV3PruneSets(clusters, survivors, checked, current, new Map((input.activePins ?? []).map((pin) => [pin.pinId, pin])));
     const keep = new Set(sets.keep);
     const retired = new Set(sets.stale);
     pruned = clusters.filter((cluster) => !keep.has(cluster.clusterKey) && (retired.has(cluster.clusterKey)
@@ -350,6 +362,57 @@ export function mergeReview(input: MergeInput): MergeResult {
     : incomplete === "edited_during_check" ? (single ? CHECK_STALE_MESSAGE : STALE_MESSAGE)
     : incomplete === "chapter_unread" ? unreadMessage(unread.size, run.refundedCredits) : undefined;
   return { review, survivors, reopened, done, failed, pruned, stale, ...(incomplete ? { incomplete } : {}), ...(message ? { message } : {}) };
+}
+
+const CANON_STALE_MESSAGE = "The manuscript changed during the canon check; check canon again.";
+const CANON_INCOMPLETE_MESSAGE = "The canon check could not look at the whole book (some chapters have not been read yet, or part of the search failed). New canon findings were saved and earlier ones kept; run a full review, then check canon again.";
+export const CANON_UNREAD_MESSAGE = "Some chapters changed since they were last reviewed, so their names are not known yet. Review the changed chapters first (that checks your canon on them too), then check canon.";
+export const CANON_SAVE_MESSAGE = "Some canon findings could not be saved; check canon again.";
+
+export interface CanonMergeInput {
+  prior: ReviewOutcome;
+  /** Grounded in the text sent. */
+  issues: readonly EngineIssue[];
+  /** Pages that moved or changed while the pass ran. */
+  edited: ReadonlySet<string>;
+  /** The engine searched the whole book and judged every pin. */
+  whole: boolean;
+  statusOf(id: string): FindingStatus;
+  texts: ReadonlyMap<string, CurrentChapter>;
+  /** Every page of the book, as sent. */
+  pages: readonly PageMeta[];
+}
+export interface CanonMergeResult { review: ReviewOutcome; survivors: Set<string>; reopened: string[]; retired: string[]; complete: boolean; message?: string }
+
+/**
+ * What a Check canon pass does (desktop runPipelineV3CanonReview.ts). It is not a chapter review: nothing is marked checked and only
+ * canon findings are stored or retired. On a changed book only findings on untouched chapters are kept, and nothing is proved about
+ * the pins. A canon finding it did not reproduce goes only after a pass that saw the whole book.
+ */
+export function mergeCanonPass(input: CanonMergeInput): CanonMergeResult {
+  const { prior, edited } = input;
+  const found = input.issues.filter((issue) => issue.type === CANON_CONFLICT_ISSUE_TYPE && citedPages(issue).every((pageId) => !edited.has(pageId)));
+  const chapterOf = new Map(prior.pages.map((page) => [page.pageId, page.sourceId]));
+  const textOf = new Map([...input.texts].map(([pageId, chapter]) => [pageId, chapter.text]));
+  const clusters = prior.issues.map((issue) => clusterOf(issue, input.statusOf(issue.issue_id)));
+  const kept = adoptPriorFindings(found, clusters, textOf, (pageId) => chapterOf.get(pageId) ?? pageId);
+  const survivors = new Set(kept.map((issue) => issue.issue_id));
+  const byId = new Map(prior.issues.map((issue) => [issue.issue_id, issue]));
+  for (const issue of kept) byId.set(issue.issue_id, issue);
+  const complete = edited.size === 0 && input.whole;
+  const retired = complete ? prior.issues.filter((issue) => issue.type === CANON_CONFLICT_ISSUE_TYPE && !survivors.has(issue.issue_id)).map((issue) => issue.issue_id) : [];
+  const gone = new Set(retired);
+  const issues = [...byId.values()].filter((issue) => !gone.has(issue.issue_id));
+  // A card must be able to name and open the page it cites.
+  const known = new Set(prior.pages.map((page) => page.pageId));
+  const cited = new Set(issues.flatMap(citedPages));
+  const message = complete ? undefined : edited.size > 0 ? CANON_STALE_MESSAGE : CANON_INCOMPLETE_MESSAGE;
+  return {
+    review: { ...prior, issues, pages: [...prior.pages, ...input.pages.filter((page) => !known.has(page.pageId) && cited.has(page.pageId))] },
+    survivors, retired, complete,
+    reopened: kept.map((issue) => issue.issue_id).filter((id) => input.statusOf(id) === "closed_auto"),
+    ...(message ? { message } : {}),
+  };
 }
 
 export { SAVE_MESSAGE };

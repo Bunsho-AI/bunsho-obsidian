@@ -3,8 +3,8 @@
  * check lifecycle, findings. Pages read its state and call its actions; components below pages receive plain props.
  */
 import { Notice, type App } from "obsidian";
-import { forgetCached, mergeCast, pruneReads, worldReads, type KeptRead } from "@/helpers/reads";
-import { itemsPending, mergeReview, parseLedger, SAVE_MESSAGE, type FindingStatus, type MergeResult, type PageLedger } from "@/helpers/reviewMerge";
+import { forgetCached, mergeCast, pruneReads, usableReads, worldReads, type KeptRead } from "@/helpers/reads";
+import { CANON_SAVE_MESSAGE, CANON_UNREAD_MESSAGE, itemsPending, mergeCanonPass, mergeReview, parseLedger, SAVE_MESSAGE, type FindingStatus, type MergeResult, type PageLedger } from "@/helpers/reviewMerge";
 import { applyPlan, buildItems, buildUnits, dropNoteIds, holdsNoteId, itemAtOffset, moveNoteIds, planQuote, snapshotId, sourceContains, sourceProblems, type PlannedItem, type SavedPlan, type SourceChoice } from "@/helpers/sources";
 import { countWords } from "@/lib/contract/countWords";
 import { ProgressTracker } from "@/helpers/progress";
@@ -23,7 +23,15 @@ import { AUTH_CONFIG } from "@/lib/services/auth/authConfig";
 import { AuthError, TokenSource, uidOfToken } from "@/lib/services/auth/authService";
 import { claimStarterCredits, formPost, makeTransport, readBalance, type ConnectionOptions } from "@/lib/services/engine/engineService";
 import { readProjectState, registerProject } from "@/lib/services/project/projectService";
-import { runReview, type ReviewOutcome, type ReviewRun } from "@/lib/services/review/reviewService";
+import { canonCredits, MAX_PINS, runCanonReview, runReview, type ReviewOutcome, type ReviewRun } from "@/lib/services/review/reviewService";
+import { lapsedPlan } from "@/helpers/account";
+import { buildCanonConflictView, type CanonConflictView } from "@/helpers/canon/conflict";
+import { capKey, dimensionEntry } from "@/helpers/canon/dimensions";
+import { addAlias, addEntity, addFact, editFact, pinFound, removeEntity, removeFact, renameEntity, unpinFact, type AddEntityOutcome, type CanonTarget, type EntityRef, type FactPatch, type FoundFact, type HandFact, type IdentityResolution, type PenContext, type PenResult } from "@/helpers/canon/pen";
+import { writerPinDigest, writerPins } from "@/helpers/canon/pins";
+import { emptyCanon, MAX_DIMENSION_CHARS, nfcKey, type CanonTracking } from "@/helpers/canon/record";
+import { foundEntities, mergeRecord, type RecordEntity } from "@/helpers/canon/world";
+import { BROKEN, readCanon, removeCanon, writeCanon, type CanonBook } from "@/lib/obsidian/canonStore";
 import { SIGNED_OUT, type Account, type Phase, type PluginData, type ReviewAction, type Scan, type StoppedReview } from "@/types";
 import { formatNumber } from "@/utils/format";
 import { acceptableEngineUrl, isLocalEngine } from "@/utils/url";
@@ -82,7 +90,7 @@ type Prepared =
   | { kind: "refused"; message: string };
 
 type Executed =
-  | { kind: "merged"; run: ReviewRun; merged: MergeResult; scan: Scan | null }
+  | { kind: "merged"; run: ReviewRun; merged: MergeResult; scan: Scan | null; pinDigest: string }
   | { kind: "failed"; error: unknown }
   | { kind: "ended" };
 
@@ -106,6 +114,8 @@ function ledgerOf(review: ReviewOutcome): PageLedger {
 }
 
 const RETURN_REFRESH_MS = 60_000;
+/** One frozen empty record, so "no canon" is the same object from read to read. */
+const EMPTY_CANON: CanonTracking = emptyCanon();
 
 export class ContinuityController {
   data!: PluginData;
@@ -119,6 +129,15 @@ export class ContinuityController {
   private accountSeq = 0;
   private idsChanged = false;
   private world: WorldData | null = null;
+  /** What the writer declared, a record per book. */
+  private canonBooks: CanonBook[] = [];
+  /** canon.json could not be read at all: nothing may replace it. */
+  private canonUnreadable = false;
+  private canonWrites: Promise<unknown> = Promise.resolve();
+  /** One pen write at a time. Each of them queues its file write on `canonWrites`, so these are two queues. */
+  private penWrites: Promise<unknown> = Promise.resolve();
+  private recordMemo: { world: WorldEntity[] | null; tracking: CanonTracking; pages: unknown; entities: RecordEntity[] } | null = null;
+  private readsMemo: { world: WorldData; policy: string; pages: unknown; complete: boolean } | null = null;
   private worldWrites: Promise<void> = Promise.resolve();
   /** Bumped when the local session ends: a review still finishing then keeps nothing. */
   private sessionGen = 0;
@@ -161,6 +180,20 @@ export class ContinuityController {
     if (!acceptableEngineUrl(this.data.engineUrl)) this.data.engineUrl = AUTH_CONFIG.engineUrl;
     await this.save();
     this.world = await readWorld(this.app, this.accountFiles());
+    await this.loadCanon();
+  }
+
+  private async loadCanon(): Promise<void> {
+    this.canonUnreadable = false;
+    try {
+      const { books, damaged } = await readCanon(this.app, this.accountFiles());
+      this.canonBooks = books;
+      if (damaged) new Notice(`Bunsho could not read all of your canon. A copy of the file was kept as ${BROKEN} in the plugin's folder.`);
+    } catch (error) {
+      console.warn("[Bunsho] could not read canon", error);
+      this.canonBooks = [];
+      this.canonUnreadable = true;
+    }
   }
 
   dispose(): void {
@@ -211,7 +244,8 @@ export class ContinuityController {
       : choice.path.startsWith(`${oldPath}/`) ? { ...choice, path: `${path}${choice.path.slice(oldPath.length)}` } : choice);
     const review = this.data.lastReview;
     const { stopped } = this.data;
-    const changes = holdsNoteId(this.data.noteIds, oldPath) || [this.data.source, this.reviewing, review?.source, stopped?.source].some((choice) => choice && follow(choice) !== choice);
+    const canonMoves = this.canonBooks.some((book) => follow(book.source) !== book.source);
+    const changes = canonMoves || holdsNoteId(this.data.noteIds, oldPath) || [this.data.source, this.reviewing, review?.source, stopped?.source].some((choice) => choice && follow(choice) !== choice);
     if (!changes) return;
     this.data.noteIds = moveNoteIds(this.data.noteIds, oldPath, path);
     if (this.data.source) this.data.source = follow(this.data.source);
@@ -219,6 +253,10 @@ export class ContinuityController {
     if (review) this.data.lastReview = { ...review, source: follow(review.source) };
     if (stopped) this.data.stopped = { ...stopped, source: follow(stopped.source) };
     await this.save();
+    if (canonMoves) {
+      this.canonBooks = this.canonBooks.map((book) => ({ ...book, source: follow(book.source) }));
+      await this.saveCanon().catch((error: unknown) => { console.warn("[Bunsho] could not save canon after a move", error); });
+    }
   }
 
   /** A note or folder is gone: a new note at that path is a new note, and the plan will show it. */
@@ -301,11 +339,15 @@ export class ContinuityController {
         const [health, balance, project] = await Promise.all([
           new PipelineV3Client(transport).health(), readBalance(transport), readProjectState(transport, this.data.workspaceId),
         ]);
-        next = { signedIn, health, balance, planName: project.planName, problem: null, project: project.state, registeredName: project.registeredName };
+        if (project.plan?.active && project.plan.tier && (project.plan.tier !== this.data.lastPlan?.tier || project.plan.renewsAt !== this.data.lastPlan?.renewsAt)) {
+          this.data.lastPlan = { tier: project.plan.tier, renewsAt: project.plan.renewsAt };
+          await this.save();
+        }
+        next = { signedIn, health, balance, planName: project.planName, problem: null, project: project.state, registeredName: project.registeredName, lapsed: lapsedPlan(project.plan, this.data.lastPlan) };
       } catch (error) {
         if (error instanceof AuthError && error.code === "signed_out") this.endSession();
         next = error instanceof AuthError && error.code === "signed_out" ? { ...SIGNED_OUT, problem: error.message }
-          : { ...next, planName: this.account.planName, balance: this.account.balance, problem: error instanceof PipelineV3Error || error instanceof AuthError ? error.message : "Could not reach Bunsho. Check your connection." };
+          : { ...next, planName: this.account.planName, balance: this.account.balance, lapsed: this.account.lapsed, problem: error instanceof PipelineV3Error || error instanceof AuthError ? error.message : "Could not reach Bunsho. Check your connection." };
       }
     }
     if (seq !== this.accountSeq) return; // signed out (or refreshed again) while this was in flight
@@ -379,7 +421,9 @@ export class ContinuityController {
     if (swapped) {
       this.starterClaimed = false;
       this.projected = null;
+      this.recordMemo = null;
       this.world = await readWorld(this.app, this.accountFiles());
+      await this.loadCanon();
     }
     await this.save();
     if (swapped) await this.refreshScan();
@@ -397,13 +441,17 @@ export class ContinuityController {
     this.abort?.abort();
     this.world = null;
     this.projected = null;
+    this.canonBooks = [];
+    this.canonUnreadable = false;
+    this.recordMemo = null;
     const dir = this.host.dir;
     Object.assign(this.data, NO_ACCOUNT_STATE, { noteIds: {}, accountKey: null, rootAccount: null, otherAccounts: {} });
     this.scan = { status: "no_source" };
     this.phase = { kind: "idle" };
     this.host.changed();
-    await this.worldWrites.catch(() => undefined);
+    await Promise.all([this.worldWrites, this.penWrites.catch(() => undefined), this.canonWrites.catch(() => undefined)]);
     await removeWorld(this.app, dir);
+    await removeCanon(this.app, dir);
     const accounts = `${dir}/accounts`;
     if (await this.app.vault.adapter.exists(accounts)) await this.app.vault.adapter.rmdir(accounts, true);
     await this.save();
@@ -462,6 +510,7 @@ export class ContinuityController {
   private whyNot(items: readonly PlannedItem[], health: PipelineV3Health): string | null {
     const quote = planQuote(items);
     if (quote.units === 0) return "Nothing is ticked in the reading plan.";
+    if (this.pins().length > MAX_PINS) return this.tooManyPins();
     if (quote.problems.length > 0) return quote.problems[0];
     if (quote.hasParts && !health.readingParts) return "Part of this is too long to read in one go, and the Bunsho service cannot read it in pieces yet. You were not charged.";
     const { balance } = this.account;
@@ -636,6 +685,7 @@ export class ContinuityController {
       const issue = review.issues.find((i) => i.issue_id === issueId);
       const revs = new Map(scan.pages.map((page) => [page.pageId, page.rev]));
       const edited = issue?.citations.some((citation) => revs.get(citation.page_id) !== citation.source_ref?.rev) ?? false;
+      const pinsBefore = writerPinDigest(this.canonTracking());
 
       const done = await this.execute(scan.items, scan.source, health, quoted, scope, "check");
       if (done.kind === "ended") { this.idle(); return { kind: "none", message: "" }; }
@@ -647,7 +697,8 @@ export class ContinuityController {
       const { run, merged, scan: after } = done;
       const proven = merged.failed.length === 0 && !merged.incomplete && !merged.stale && !run.capped && run.lostFindings === 0
         && after?.status === "ready" && after.snapshotId === run.snapshotId && !merged.survivors.has(issueId) && edited
-        && await this.policyStands(health);
+        // The writer's declarations are part of what a check is against: pins that moved prove nothing about this card.
+        && writerPinDigest(this.canonTracking()) === pinsBefore && await this.policyStands(health);
       if (session !== this.sessionGen) { this.idle(); return { kind: "none", message: "" }; } // signed out during that last question
       if (proven) this.data.fixed = [...new Set([...this.data.fixed, issueId])];
       const saved = await this.persist(merged, run, scan.items, scope, quoted);
@@ -692,6 +743,7 @@ export class ContinuityController {
 
   /** whyNot, for a review that sends only some chapters whole: the rest are passages, listed but never charged. */
   private whyNotScoped(scan: ReadyScan, scope: ReadonlySet<string>, health: PipelineV3Health, quoted: number): string | null {
+    if (this.pins().length > MAX_PINS) return this.tooManyPins();
     const { units } = buildUnits(scan.items, () => "");
     if (units.length > PIPELINE_V3_LIMITS.maxPages) return planQuote(scan.items).problems[0] ?? null;
     if (units.some((unit) => unit.part) && !health.readingParts) return "Part of this is too long to read in one go, and the Bunsho service cannot read it in pieces yet. You were not charged.";
@@ -706,7 +758,9 @@ export class ContinuityController {
     const done = await this.execute(items, source, health, credits, scope, reason);
     if (done.kind === "ended") return this.idle();
     if (done.kind === "failed") return this.reviewFailed(done.error, action, source, scope?.size ?? items.filter((item) => item.included).length, credits);
-    await this.persist(done.merged, done.run, items, scope, credits);
+    const saved = await this.persist(done.merged, done.run, items, scope, credits);
+    // A whole-book review that finished checked every pin it carried, which may be fewer than there are now.
+    if (saved && !scope && !done.merged.incomplete && !done.merged.stale && !done.run.capped) await this.recordCanonChecked(done.run.source, done.pinDigest);
     this.idle();
     await this.refreshAccount();
   }
@@ -723,6 +777,8 @@ export class ContinuityController {
     const session = this.sessionGen;
     const fresh: ChapterRead[] = [];
     const { world } = this;
+    const tracking = this.canonTracking();
+    const pinDigest = writerPinDigest(tracking);
     this.setPhase({ kind: "checking", share: 0, waiting: true });
     try {
       let run: ReviewRun;
@@ -730,7 +786,7 @@ export class ContinuityController {
         run = await runReview({
           items, source, health, workspaceId: this.data.workspaceId, client: new PipelineV3Client(this.transport()), scope,
           known: world ? { reads: world.reads, cast: world.cast, fromFullReview: world.fromFullReview } : undefined,
-          maxCredits: credits ?? undefined, signal: abort.signal,
+          maxCredits: credits ?? undefined, signal: abort.signal, pins: writerPins(tracking),
           callbacks: { onRead: (read) => { fresh.push(read); }, onProgress: (p) => this.setPhase({ kind: "checking", share: tracker.update(p), waiting: false, stage: p.stage }) },
         });
       } catch (error) {
@@ -749,7 +805,7 @@ export class ContinuityController {
       const merged = mergeReview({
         prior: this.currentReview(), run: { ...run, source: this.reviewing ?? run.source }, scope: scope ? "chapters" : "full", reason, checked: run.checked, edited,
         pageSetChanged: [...current.keys()].some((pageId) => !sent.has(pageId)), alone: run.alone, policyId: health.policyId, checkedAt: run.checkedAt,
-        statusOf: (id) => this.statusOf(id), items, texts: run.texts,
+        statusOf: (id) => this.statusOf(id), items, texts: run.texts, activePins: this.pins(),
       });
       // Reads streamed under a read policy other than the one they were filed under cannot be sent back.
       const sameReadPolicy = run.readPolicyId === health.readPolicyId;
@@ -761,7 +817,7 @@ export class ContinuityController {
         fromFullReview: scope ? world?.fromFullReview ?? false : true,
       });
       if (session !== this.sessionGen) return { kind: "ended" }; // signed out while the World was being kept
-      return { kind: "merged", run, merged, scan: now };
+      return { kind: "merged", run, merged, scan: now, pinDigest };
     } finally {
       if (this.abort === abort) this.abort = null;
       this.reviewing = null;
@@ -809,6 +865,13 @@ export class ContinuityController {
       this.data.stopped = stopped;
       try { await this.save(); } catch (saveError) { console.warn("[Bunsho] could not save", saveError); }
     };
+    // Check canon marks nothing checked, so it says nothing about chapters. A cancelled one the engine did not charge leaves nothing to say.
+    if (action.kind === "canon" && error instanceof PipelineV3Error && error.code === "cancelled") {
+      if (error.detail.charged === false) this.idle();
+      else this.setPhase({ kind: "error", message: error.message, charged: true, action });
+      await this.refreshAccount();
+      return;
+    }
     if (error instanceof PipelineV3Error && error.code === "cancelled") {
       // A review the engine says it did not charge leaves nothing to say. An unknown charge is not a free one.
       if (error.detail.charged !== false) await stop({ status: "partial", source, checked: 0, failed: total, total, message: error.message, credits });
@@ -835,6 +898,7 @@ export class ContinuityController {
     if (phase.kind !== "error" || !phase.action || scan.status !== "ready") return null;
     if (phase.action.kind === "full") return this.price();
     if (phase.action.kind === "changes") return this.changedChapters()?.credits ?? null;
+    if (phase.action.kind === "canon") return this.canonOffer()?.credits ?? null;
     const { itemId } = phase.action;
     return scan.itemChars[itemId] === undefined ? null : this.priceFor(scan.itemChars[itemId], this.account.health);
   }
@@ -849,6 +913,7 @@ export class ContinuityController {
     if (action.kind === "full") return this.check();
     if (quoted === null) return;
     if (action.kind === "changes") return this.reviewChanged(quoted);
+    if (action.kind === "canon") return this.checkCanon(quoted);
     return this.checkChapter(action.itemId, quoted);
   }
 
@@ -934,6 +999,234 @@ export class ContinuityController {
   /** Selects the passage a World fact came from. */
   async jumpToFact(row: WorldRow): Promise<void> {
     await this.jump({ page_id: row.pageId, quoted_text: row.quote, source_ref: { snapshotId: "", pageId: row.pageId, rev: "", start: row.start, end: row.end } });
+  }
+
+  private currentBook(): CanonBook | null {
+    const { source } = this.data;
+    return source ? this.canonBooks.find((book) => book.source.kind === source.kind && book.source.path === source.path) ?? null : null;
+  }
+
+  /** What the writer declared for the book picked now. */
+  canonTracking(): CanonTracking { return this.currentBook()?.tracking ?? EMPTY_CANON; }
+
+  /** The active pins of the book picked now. */
+  private pins() { return writerPins(this.canonTracking()); }
+
+  private tooManyPins(): string { return `Bunsho can check up to ${MAX_PINS} declared facts at a time, and you have ${formatNumber(this.pins().length)}. Revert some, then try again. You were not charged.`; }
+
+  private saveCanon(): Promise<void> {
+    const dir = this.accountFiles();
+    const books = this.canonBooks;
+    const write = this.canonWrites.catch(() => undefined).then(() => writeCanon(this.app, dir, books));
+    this.canonWrites = write;
+    return write;
+  }
+
+  /** The pen rests while a plan has lapsed: everything declared still reads. */
+  get penOpen(): boolean { return this.account.lapsed === null && !this.canonUnreadable; }
+
+  /** The World, what checks found with what the writer declared over it. Empty when neither has anything to say. */
+  worldRecord(): RecordEntity[] {
+    const world = this.worldEntities();
+    const tracking = this.canonTracking();
+    const pages = this.currentReview()?.pages ?? null;
+    if (this.recordMemo?.world === world && this.recordMemo.tracking === tracking && this.recordMemo.pages === pages) return this.recordMemo.entities;
+    const entities = mergeRecord(world ?? [], tracking, (pageId) => this.pageLabel(pageId));
+    this.recordMemo = { world, tracking, pages, entities };
+    return entities;
+  }
+
+  private pageLabel(pageId: string): string | null { return this.currentReview()?.pages.find((page) => page.pageId === pageId)?.label ?? null; }
+
+  /** One pen write at a time, each on the record the last one left. The record is only replaced once it is on disk. */
+  private penWrite<T>(apply: (tracking: CanonTracking, context: PenContext) => PenResult<T>): Promise<PenResult<T>> {
+    const failed = (): PenResult<T> => ({ success: false, code: "INTERNAL_ERROR", error: "That could not be saved." });
+    const run = async (): Promise<PenResult<T>> => {
+      const { source } = this.data;
+      if (!source || !this.penOpen) return failed();
+      const book = this.currentBook();
+      const tracking = book?.tracking ?? emptyCanon();
+      const result = apply(tracking, { now: new Date().toISOString(), found: foundEntities(this.worldEntities() ?? [], tracking) });
+      if (!result.success || !result.changed) return result;
+      const before = this.canonBooks;
+      this.canonBooks = book ? before.map((b) => (b === book ? { ...b, tracking: result.tracking } : b)) : [...before, { source, tracking: result.tracking, checked: null }];
+      try {
+        await this.saveCanon();
+      } catch (error) {
+        console.warn("[Bunsho] could not save canon", error);
+        this.canonBooks = before;
+        return failed();
+      }
+      // A Free account's story record lives in its one project: its first declaration makes this vault that project, as a first check does.
+      if (this.account.project === "unregistered") {
+        try {
+          await registerProject(this.connection(), this.data.workspaceId, this.projectName());
+          this.account = { ...this.account, project: "ok" };
+        } catch (error) { console.warn("[Bunsho] could not register this project", error); }
+      }
+      this.host.changed();
+      return result;
+    };
+    const write = this.penWrites.catch(() => undefined).then(run);
+    this.penWrites = write;
+    return write;
+  }
+
+  private refOf(entityId: string): EntityRef | null { return this.worldRecord().find((entity) => entity.id === entityId)?.ref ?? null; }
+
+  /** "Make canon" on a found row, found afresh: a row that has gone since it was shown is refused, never pinned by id alone. */
+  makeCanon(entityId: string, rowId: string): Promise<PenResult<{ id: string; declaredAt: string }>> {
+    return this.penWrite((tracking, context) => {
+      const stale: PenResult<{ id: string; declaredAt: string }> = { success: false, code: "STALE_TARGET", error: "That fact changed since it was shown — reloading" };
+      const entity = this.worldRecord().find((e) => e.id === entityId);
+      const row = entity?.rows.find((r) => r.id === rowId)?.found;
+      if (!entity || !row) return stale;
+      const from = { pageId: row.pageId, pageOrder: row.order, rev: row.rev, quote: row.quote };
+      const counterpart = row.counterpart ? this.refOf(row.counterpart) : undefined;
+      if (row.counterpart && !counterpart) return stale;
+      const fact: FoundFact = row.polarity ? { kind: "knowledge", polarity: row.polarity, proposition: row.value, from }
+        : { kind: "state", dimension: row.family ?? capKey(row.dimension, MAX_DIMENSION_CHARS), value: row.value, stability: row.stability, ...(counterpart ? { counterpart } : {}), from };
+      return pinFound(tracking, context, { entity: entity.ref, fact });
+    });
+  }
+
+  revertFact(target: CanonTarget): Promise<PenResult<{ outcome: "restored" | "removed" }>> { return this.penWrite((tracking, context) => unpinFact(tracking, context, target)); }
+  removeFact(target: CanonTarget): Promise<PenResult<{ outcome: "restored" | "removed" }>> { return this.penWrite((tracking, context) => removeFact(tracking, context, target)); }
+  editFact(target: CanonTarget, patch: FactPatch): Promise<PenResult<{ declaredAt: string; changed: boolean }>> { return this.penWrite((tracking, context) => editFact(tracking, context, target, patch)); }
+
+  addAlias(entityId: string, text: string, resolution?: IdentityResolution, matched?: EntityRef): Promise<PenResult<{ entityId: string; added: boolean }>> {
+    return this.penWrite((tracking, context) => {
+      const entity = this.refOf(entityId);
+      return entity ? addAlias(tracking, context, { entity, text, resolution, matched }) : { success: false, code: "NOT_FOUND", error: "That entity is no longer in the record" };
+    });
+  }
+
+  addEntity(canonicalName: string, type: string, aliases: readonly string[], resolution?: IdentityResolution, matched?: EntityRef): Promise<PenResult<AddEntityOutcome>> {
+    return this.penWrite((tracking, context) => addEntity(tracking, context, { canonicalName, type, aliases, resolution, matched }));
+  }
+
+  renameEntity(entityId: string, canonicalName: string, resolution?: IdentityResolution): Promise<PenResult<{ entityId: string; canonicalName: string; outcome: "renamed" | "unchanged" }>> {
+    return this.penWrite((tracking, context) => {
+      const entity = this.refOf(entityId);
+      return entity ? renameEntity(tracking, context, { entity, canonicalName, resolution }) : { success: false, code: "NOT_FOUND", error: "That entity is no longer in the record" };
+    });
+  }
+
+  removeEntity(entityId: string): Promise<PenResult<{ entityId: string; removedStates: number; removedKnowledge: number }>> {
+    return this.penWrite((tracking, context) => removeEntity(tracking, context, entityId));
+  }
+
+  /**
+   * "Add a fact". `key` is a vocabulary key. A relationship's or possession's `detail` is a card's id, a stance's the topic as typed.
+   * Typing what a check already found pins it, keeping its page.
+   */
+  addFact(entityId: string, key: string, detail: string | null, value: string): Promise<PenResult<{ kind: "state" | "knowledge"; id: string; outcome: "created" | "pinned" | "unchanged" }>> {
+    return this.penWrite((tracking, context) => {
+      const entity = this.worldRecord().find((e) => e.id === entityId);
+      if (!entity) return { success: false, code: "NOT_FOUND", error: "That entity is no longer in the record" };
+      const entry = dimensionEntry(key);
+      const sameValue = (text: string): boolean => nfcKey(text) === nfcKey(value);
+      const foundRow = (test: (row: WorldRow) => boolean): WorldRow | undefined => entity.rows.flatMap((r) => (r.found ? [r.found] : [])).find((row) => test(row) && sameValue(row.value));
+      const page = (row: WorldRow | undefined) => (row ? { from: { pageId: row.pageId, pageOrder: row.order, rev: row.rev, quote: row.quote } } : {});
+      let fact: HandFact;
+      if (entry?.kind === "knowledge") fact = { kind: "knowledge", polarity: key, proposition: value, ...page(foundRow((row) => row.polarity === key)) };
+      else if (entry?.param === "entity") {
+        const counterpart = detail ? this.refOf(detail) : null;
+        if (!counterpart) return { success: false, code: "INVALID_INPUT", error: "That dimension names an entity that is not in the record" };
+        fact = { kind: "state", dimension: key, value, counterpart, ...page(foundRow((row) => row.family === key && row.counterpart === detail)) };
+      } else if (entry?.param === "topic") {
+        const dimension = `${key}:${detail ?? ""}`;
+        fact = { kind: "state", dimension, value, ...page(foundRow((row) => nfcKey(row.dimension) === nfcKey(dimension.replace(/\s+/gu, "_")))) };
+      } else fact = { kind: "state", dimension: key, value, ...page(foundRow((row) => row.dimension === key)) };
+      return addFact(tracking, context, { entity: entity.ref, fact });
+    });
+  }
+
+  /** A canon finding as its card reads it, or null when it should read as an ordinary finding. */
+  canonConflict(issue: EngineIssue): CanonConflictView | null {
+    const review = this.currentReview();
+    const place = new Map(review?.coverage.sources.map((source, at) => [source.id, at + 1]));
+    const pages = new Map(review?.pages.map((page) => [page.pageId, page.sourceId]));
+    return buildCanonConflictView(issue, this.canonTracking(), (pageId, order) => place.get(pages.get(pageId) ?? "") ?? order + 1, (pageId) => this.pageLabel(pageId));
+  }
+
+  /**
+   * The Check canon offer: the canon changed since the whole book was last checked against it, every chapter's read stands, and the
+   * price is known. Canon is checked free in every review; this is for when it changed in between.
+   */
+  canonOffer(): { pins: number; credits: number } | null {
+    const { scan, world } = this;
+    const { health } = this.account;
+    const book = this.currentBook();
+    if (!book || !world || !health || !this.chapterChecksOpen() || scan.status !== "ready") return null;
+    const pins = writerPins(book.tracking);
+    if (pins.length === 0 || pins.length > MAX_PINS || book.checked?.pinDigest === writerPinDigest(book.tracking)) return null;
+    if (this.readsMemo?.world !== world || this.readsMemo.policy !== health.readPolicyId || this.readsMemo.pages !== scan.pages) {
+      this.readsMemo = { world, policy: health.readPolicyId, pages: scan.pages, complete: usableReads(world.reads, health.readPolicyId, scan.pages).length === scan.pages.length };
+    }
+    if (!this.readsMemo.complete) return null;
+    const credits = canonCredits(health, scan.chars, pins.length);
+    return credits === null ? null : { pins: pins.length, credits };
+  }
+
+  private async recordCanonChecked(source: SourceChoice, pinDigest: string): Promise<void> {
+    const book = this.currentBook();
+    if (!book || book.source.kind !== source.kind || book.source.path !== source.path) return;
+    this.canonBooks = this.canonBooks.map((b) => (b === book ? { ...b, checked: { pinDigest, checkedAt: new Date().toISOString() } } : b));
+    await this.saveCanon().catch((error: unknown) => { console.warn("[Bunsho] could not record the canon check", error); });
+  }
+
+  /** Check canon, at the price on its button. Stores or retires canon findings alone: nothing is marked checked, and the cast stays. */
+  async checkCanon(quoted: number): Promise<void> {
+    if (this.busy) return;
+    this.setPhase({ kind: "preparing" });
+    try {
+      const prepared = await this.prepareScoped(quoted, (scan) => scan.items.filter((item) => item.included).map((item) => item.id));
+      if (prepared.kind === "quiet") return this.idle();
+      if (prepared.kind === "refused") return this.fail(prepared.message);
+      const { scan, health, review } = prepared;
+      const tracking = this.canonTracking();
+      const pins = writerPins(tracking);
+      if (pins.length === 0 || !this.world) return this.idle();
+      const pinDigest = writerPinDigest(tracking);
+      const source = scan.source;
+      const abort = new AbortController();
+      this.abort = abort;
+      this.reviewing = source;
+      const session = this.sessionGen;
+      const tracker = new ProgressTracker();
+      this.setPhase({ kind: "checking", share: 0, waiting: true });
+      try {
+        const run = await runCanonReview({ items: scan.items, health, workspaceId: this.data.workspaceId, client: new PipelineV3Client(this.transport()), pins, reads: this.world.reads, maxCredits: quoted, signal: abort.signal,
+          callbacks: { onProgress: (p) => this.setPhase({ kind: "checking", share: tracker.update(p), waiting: false, stage: p.stage }) } });
+        if (session !== this.sessionGen) return this.idle();
+        if (run.kind === "unread") return this.fail(CANON_UNREAD_MESSAGE, false);
+        let now: Scan | null = null;
+        try { now = await this.freshScan(); } catch (error) { console.warn("[Bunsho] could not read the notes after a canon check", error); }
+        if (session !== this.sessionGen) return this.idle();
+        const current = new Map(now?.status === "ready" ? now.pages.map((page) => [page.pageId, page]) : []);
+        const edited = new Set(run.pages.filter((page) => { const moved = current.get(page.pageId); return !moved || moved.rev !== page.rev || moved.order !== page.order; }).map((page) => page.pageId));
+        const merged = mergeCanonPass({ prior: review, issues: run.issues, edited, whole: !run.capped && !run.skipped && run.lostFindings === 0, statusOf: (id) => this.statusOf(id), texts: run.texts, pages: run.pages });
+        const reopened = new Set(merged.reopened);
+        this.data.fixed = this.data.fixed.filter((id) => !reopened.has(id));
+        this.data.lastReview = merged.review;
+        let saved = true;
+        try { await this.save(); } catch (error) { saved = false; console.warn("[Bunsho] could not save the canon findings", error); }
+        if (saved && merged.complete) await this.recordCanonChecked(source, pinDigest);
+        const message = saved ? merged.message : CANON_SAVE_MESSAGE;
+        if (message) this.setPhase({ kind: "error", message, charged: true, action: { kind: "canon" } });
+        else this.idle();
+        await this.refreshAccount();
+      } catch (error) {
+        if (session !== this.sessionGen) return this.idle();
+        return await this.reviewFailed(error, { kind: "canon" }, source, 0, quoted);
+      } finally {
+        if (this.abort === abort) this.abort = null;
+        this.reviewing = null;
+      }
+    } catch (error) {
+      this.fail(error instanceof Error ? error.message : "The canon check failed.");
+    }
   }
 
   private setPhase(phase: Phase): void { this.phase = phase; this.host.changed(); }

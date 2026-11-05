@@ -2,6 +2,7 @@
 import type { PageMeta, PlannedItem, SavedPlan, SourceChoice } from "@/helpers/sources";
 import type { ProjectState } from "@/helpers/project";
 import type { PipelineV3Health } from "@/lib/contract/pipelineV3.types";
+import type { LapsedPlan } from "@/helpers/account";
 import type { AccountOwned } from "@/helpers/accounts";
 import type { ReviewOutcome } from "@/lib/services/review/reviewService";
 
@@ -52,7 +53,8 @@ export interface StoppedReview {
 export type ReviewAction =
   | { kind: "full" }
   | { kind: "changes" }
-  | { kind: "chapter"; itemId: string };
+  | { kind: "chapter"; itemId: string }
+  | { kind: "canon" };
 
 export type Scan =
   /** Nothing picked yet. */
@@ -94,6 +96,8 @@ export interface Account {
   /** The Free tier's one-project rule for this vault (helpers/project.ts). */
   project: ProjectState;
   registeredName: string | null;
+  /** A plan that ended, on a fresh read: canon reads until they renew. */
+  lapsed: LapsedPlan | null;
 }
 
-export const SIGNED_OUT: Account = { signedIn: false, balance: null, planName: null, health: null, problem: null, project: "unknown", registeredName: null };
+export const SIGNED_OUT: Account = { signedIn: false, balance: null, planName: null, health: null, problem: null, project: "unknown", registeredName: null, lapsed: null };

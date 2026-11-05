@@ -29,7 +29,7 @@ import {
   stateDimensionEntries,
   topicKey,
 } from "@/helpers/canon/dimensions";
-import { STABILITY } from "@/helpers/canon/record";
+const STABILITY = { STABLE: "stable", DYNAMIC: "dynamic" } as const;
 
 /**
  * bunsho-engine/src/types/tracking.ts, "DIMENSION CONVENTIONS for StateRecord.dimension":

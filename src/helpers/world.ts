@@ -23,6 +23,16 @@ export interface WorldRow {
   earlier: boolean;
   /** The page's place in the story. */
   order: number;
+  /** The page revision the read was made from. */
+  rev: string;
+  /** The dimension it is filed under. A relationship's or possession's names the other party by cast id, which moves between checks. */
+  dimension: string;
+  /** relationship or possession: the family, and the other party. */
+  family: "relationship" | "possession" | null;
+  counterpart: string | null;
+  /** knows, suspects, believes_false or unaware, for what someone knows. */
+  polarity: string | null;
+  stability: "stable" | "dynamic";
 }
 
 /** A changing state moving on between two chapters (desktop's Events). What lasts has none: a later different value is a finding. */
@@ -40,6 +50,8 @@ export interface WorldEntity {
   name: string;
   type: WorldEntityType;
   aliases: string[];
+  /** The names the cast is sure are names, not descriptions: what links someone to the writer's record. */
+  properNames: string[];
   /** Pages the book's cast places them on. */
   scenes: number;
   tier: WorldTier;
@@ -54,7 +66,7 @@ const ENTITY_TYPE: Record<CastKind, WorldEntityType> = {
 /** Desktop helpers.ts significanceTier. */
 const MAIN_MIN = 5;
 const SUPPORTING_MIN = 2;
-const tierOf = (scenes: number): WorldTier => (scenes >= MAIN_MIN ? "main" : scenes >= SUPPORTING_MIN ? "supporting" : "mentioned");
+export const tierOf = (scenes: number): WorldTier => (scenes >= MAIN_MIN ? "main" : scenes >= SUPPORTING_MIN ? "supporting" : "mentioned");
 
 /** The vocabulary's labels (desktop shared/canon/dimensions.ts) and whether a found value stands or can change. */
 const VOCABULARY: Readonly<Record<string, { label: string; lasting: boolean }>> = {
@@ -180,7 +192,8 @@ export function projectWorld(cast: readonly CastMember[], reads: readonly Chapte
       const bucket = buckets.get(filed.key) ?? [];
       buckets.set(filed.key, bucket);
       const row: WorldRow = { key: `${filed.key}\u0000${read.pageId}\u0000${fact.span.start}`, label: filed.label, value: (fact.value as string).trim(), quote: fact.quote,
-        pageId: read.pageId, start: fact.span.start, end: fact.span.end, earlier: false, order: orderOf(read) };
+        pageId: read.pageId, start: fact.span.start, end: fact.span.end, earlier: false, order: orderOf(read), rev: read.rev, dimension: filed.key,
+        family: filed.family ?? null, counterpart: filed.counterpart ?? null, polarity: KNOWLEDGE.has(dimension) ? dimension : null, stability: lasting ? "stable" : "dynamic" };
       const last = bucket[bucket.length - 1];
       // What lasts keeps its first value (a later different one is a finding, not the world). What changes records each change.
       if (!last) bucket.push(row);
@@ -193,7 +206,7 @@ export function projectWorld(cast: readonly CastMember[], reads: readonly Chapte
     const own = displayName(member);
     const buckets = [...(rows.get(member.id)?.values() ?? [])];
     return {
-      id: member.id, name: own, type: ENTITY_TYPE[member.kind], scenes, tier: tierOf(scenes),
+      id: member.id, name: own, type: ENTITY_TYPE[member.kind], scenes, tier: tierOf(scenes), properNames: member.properNames,
       aliases: [...new Map(memberNames(member).filter((name) => nameKey(name) && nameKey(name) !== nameKey(own)).map((name) => [nameKey(name), name])).values()],
       rows: buckets.flat(),
       changes: buckets.flatMap((bucket) => bucket.slice(1).flatMap((to, i) => {
@@ -205,12 +218,12 @@ export function projectWorld(cast: readonly CastMember[], reads: readonly Chapte
 }
 
 /** The dimension a fact is filed under and its label, or nothing when it cannot be filed without guessing. */
-function fileUnder(fact: Fact, subject: CastMember, memberFor: (name: string | null | undefined) => CastMember | undefined, displayName: (member: CastMember) => string): { key: string; label: string } | undefined {
+function fileUnder(fact: Fact, subject: CastMember, memberFor: (name: string | null | undefined) => CastMember | undefined, displayName: (member: CastMember) => string): { key: string; label: string; family?: "relationship" | "possession"; counterpart?: string } | undefined {
   const key = fact.dimension as string;
   if (key === "relationship" || key === "possession") {
     const other = memberFor(fact.counterpart);
     if (!other || other.id === subject.id || (key === "possession" && (ENTITY_TYPE[other.kind] === "character" || ENTITY_TYPE[other.kind] === "organization"))) return undefined;
-    return { key: `${key}:${other.id}`, label: `${VOCABULARY[key].label} ${displayName(other)}` };
+    return { key: `${key}:${other.id}`, label: `${VOCABULARY[key].label} ${displayName(other)}`, family: key, counterpart: other.id };
   }
   if (key === "stance") {
     const topic = topicKey(fact.attribute);
@@ -229,7 +242,7 @@ export type WorldEntityFilter = Exclude<WorldFilter, "events">;
 const FILTER_TYPES: Record<WorldEntityFilter, WorldEntityType> = { people: "character", places: "location", things: "object", groups: "organization" };
 
 /** Entities of a filter that match a search over names, labels and values. */
-export function filterWorld(entities: readonly WorldEntity[], filter: WorldEntityFilter, search: string): WorldEntity[] {
+export function filterWorld<T extends { type: string; name: string; aliases: readonly string[]; rows: ReadonlyArray<{ label: string; value: string }> }>(entities: readonly T[], filter: WorldEntityFilter, search: string): T[] {
   const query = search.trim().toLocaleLowerCase();
   return entities.filter((entity) => FILTER_TYPES[filter] === entity.type
     && (!query || [entity.name, ...entity.aliases, ...entity.rows.flatMap((r) => [r.label, r.value])].some((text) => text.toLocaleLowerCase().includes(query))));

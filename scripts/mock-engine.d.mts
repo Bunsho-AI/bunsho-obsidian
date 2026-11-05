@@ -14,6 +14,9 @@ export interface MockBehaviour {
   tier: string;
   enforce: boolean;
   subscriptionDown: boolean;
+  pinsDropped: number;
+  skipped: number;
+  renewsAt: string | null;
   failWith: string | null;
   tamper: boolean | "prior";
   tickMs: number;
@@ -26,6 +29,7 @@ export interface MockStart {
   scope: string;
   maxCredits?: number;
   focusNames: string[];
+  pins: Array<{ pinId: string; entityId: string; entityName: string; aliases: string[]; dimension: string; value: string; declaredAt: string }>;
   cachedReads: Array<{ pageId: string; rev: string; order: number; facts: unknown[] }>;
   pages: Array<{ pageId: string; order: number; rev: string; send: string; part?: { sourceId: string; sourceOrder: number; index: number; of: number } }>;
 }
@@ -44,5 +48,7 @@ export interface MockEngine {
   close(): Promise<void>;
 }
 export function startMockEngine(options?: MockEngineOptions): Promise<MockEngine>;
+export const MAX_PINS: number;
+export function canonFindings(start: unknown, pages: Map<string, string>): unknown[];
 export function findings(start: unknown, pages: Map<string, string>): unknown[];
 export function readsOf(start: unknown, pages: Map<string, string>): unknown[];
