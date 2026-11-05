@@ -68,3 +68,11 @@ export function parseOtherAccounts(value: unknown): Record<string, AccountOwned>
     return [key, { source: choice(raw.source), plan: plan(raw.plan), dismissed: ids(raw.dismissed), deliberate: ids(raw.deliberate), fixed: ids(raw.fixed), lastReview: review, stopped, lastPlan: parseLastPlan(raw.lastPlan) }];
   }));
 }
+
+/** Held accounts' data as a rename leaves it: what they picked, their review and their stopped review all follow a note or folder. */
+export function followHeld(others: Readonly<Record<string, AccountOwned>>, follow: (choice: SourceChoice) => SourceChoice): Record<string, AccountOwned> {
+  return Object.fromEntries(Object.entries(others).map(([key, held]) => [key, { ...held,
+    source: held.source && follow(held.source),
+    lastReview: held.lastReview && { ...held.lastReview, source: follow(held.lastReview.source) },
+    stopped: held.stopped && { ...held.stopped, source: follow(held.stopped.source) } }]));
+}

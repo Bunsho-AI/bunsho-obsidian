@@ -15,7 +15,7 @@ export function IdentityPrompt(parent: HTMLElement, props: IdentityPromptProps):
   const actions = box.createDiv({ cls: "bunsho-identity-actions" });
   const link = actions.createEl("button", { cls: "bunsho-identity-link", text: `Another name for ${identityShortName(props.name, props.type)}`, attr: { "data-focus-key": props.focusKey } });
   link.onclick = props.onLink;
-  actions.createEl("button", { cls: "bunsho-identity-new", text: `A new ${noun}` }).onclick = props.onCreate;
+  actions.createEl("button", { cls: "bunsho-identity-new", text: `A new ${noun}`, attr: { "data-focus-key": `${props.focusKey}:new` } }).onclick = props.onCreate;
   if (props.quote) {
     const sample = box.createDiv({ cls: "bunsho-identity-sample" });
     if (props.coordinate) sample.createSpan({ cls: "bunsho-fact bunsho-identity-where", text: props.coordinate });

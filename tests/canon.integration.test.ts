@@ -29,6 +29,7 @@ async function setup(options: { notes?: Record<string, string>; failWrite?: () =
         read: (path: string) => Promise.resolve(stored.get(path) ?? ""),
         write: (path: string, text: string) => { if (options.failWrite?.() && path.includes("canon")) return Promise.reject(new Error("disk")); stored.set(path, text); return Promise.resolve(); },
         remove: (path: string) => { stored.delete(path); return Promise.resolve(); },
+        list: (path: string) => Promise.resolve({ files: [...stored.keys()].filter((key) => key.startsWith(`${path}/`) && !key.slice(path.length + 1).includes("/")), folders: [] }),
         rename: (from: string, to: string) => { stored.set(to, stored.get(from) ?? ""); stored.delete(from); return Promise.resolve(); },
         mkdir: () => Promise.resolve(),
         rmdir: (path: string) => { for (const key of [...stored.keys()]) if (key.startsWith(`${path}/`)) stored.delete(key); return Promise.resolve(); },
@@ -128,14 +129,86 @@ describe("where canon lives", () => {
     expect(controller.canonTracking().entities.entities.map((e) => e.canonicalName)).toEqual(["Odile", "セルマ"]);
   });
 
-  it("a file it cannot read is kept, never replaced with an empty record", async () => {
-    const { controller, stored, data } = await setup({ stored: [[CANON, "{not json"]] });
+  it("a file it cannot read is kept, and no write or move can replace it", async () => {
+    const { controller, stored } = await setup({ stored: [[CANON, "{not json"]] });
     expect(stored.get("plugins/bunsho/canon.broken.json")).toBe("{not json");
+    expect(controller.penOpen).toBe(false);
+    expect(controller.canonProblem).toContain("canon.broken.json");
+    expect(await controller.addEntity("Odile", "character", [])).toMatchObject({ success: false });
+    await controller.moved("Novel", "Book");
     expect(stored.get(CANON)).toBe("{not json");
-    expect(controller.canonTracking().entities.entities).toEqual([]);
+  });
+
+  it("a newer version of the file is treated the same: it is not ours to overwrite", async () => {
+    const raw = JSON.stringify({ version: 99, books: [] });
+    const { controller, stored } = await setup({ stored: [[CANON, raw]] });
+    expect(await controller.addEntity("Odile", "character", [])).toMatchObject({ success: false });
+    expect(stored.get(CANON)).toBe(raw);
+  });
+
+  it("while canon cannot be read a check refuses before anything is spent, so no canon card is retired", async () => {
+    const { controller, stored, data } = await checked({ notes: { "Book/a.md": "Her eyes were green.", "Book/b.md": "Nothing." } });
+    await controller.addFact(mira(controller).id, "appearance:eye_color", null, "grey");
+    await controller.checkCanon(controller.canonOffer()!.credits);
+    const cards = data().lastReview!.issues.length;
+    stored.set(CANON, "{damaged by a sync conflict");
+    await (controller as unknown as { loadCanon(): Promise<void> }).loadCanon();
+    const starts = engine!.starts.length;
+    await controller.check();
+    expect(controller.phase).toMatchObject({ kind: "error", message: expect.stringContaining("could not read your canon") });
+    expect(engine!.starts.length).toBe(starts);
+    expect(data().lastReview!.issues).toHaveLength(cards);
+    expect(controller.canonOffer()).toBeNull();
+  });
+
+  it("each damaged file gets its own copy, and the same one is not copied again", async () => {
+    const first = await setup({ stored: [[CANON, "{one"]] });
+    await engine!.close();
+    const { stored } = await setup({ stored: [...first.stored, [CANON, "{two"]] });
+    expect(stored.get("plugins/bunsho/canon.broken.json")).toBe("{one");
+    expect(stored.get("plugins/bunsho/canon.broken-2.json")).toBe("{two");
+    await engine!.close();
+    const third = await setup({ stored });
+    expect([...third.stored.keys()].filter((key) => key.includes("broken"))).toHaveLength(2);
+    await third.controller.deleteData();
+    expect([...third.stored.keys()].filter((key) => key.includes("canon"))).toEqual([]);
+  });
+
+  it("a rename while another account is signed in reaches the held account's data and canon", async () => {
+    const { controller } = await checked();
+    await pinEyes(controller);
+    controller.data.devUid = "second";
+    await controller.refresh();
+    await controller.moved("Novel", "Book");
+    controller.data.devUid = "test";
+    await controller.refresh();
+    expect(controller.data.source?.path).toBe("Novel");
+    expect(controller.currentReview()).not.toBeNull();
+    expect(controller.canonTracking().timeline.states).toHaveLength(1);
+  });
+
+  it("offline, a session is still known by the key remembered beside it, not by what data.json says", async () => {
+    const { controller, app } = await checked();
+    const owner = "e".repeat(24);
+    (app as unknown as { secretStorage: { getSecret(id: string): string } }).secretStorage.getSecret = (id) => (id === "bunsho-session-owner" ? owner : "");
+    controller.data.devUid = "";
+    const tokens = (controller as unknown as { tokens: { idToken(): Promise<string>; signedIn(): Promise<boolean> } }).tokens;
+    tokens.signedIn = () => Promise.resolve(true);
+    tokens.idToken = () => Promise.reject(new Error("offline"));
+    await controller.refreshAccount();
+    expect(controller.data.accountKey).toBe(owner);
+    expect(controller.currentReview()).toBeNull();
+  });
+
+  it("a write that fails takes back itself alone", async () => {
+    let fail = false;
+    const { controller } = await setup({ failWrite: () => fail });
     await controller.addEntity("Odile", "character", []);
-    expect(stored.get("plugins/bunsho/canon.broken.json")).toBe("{not json");
-    expect(data().dismissed).toEqual([]);
+    fail = true;
+    const write = controller.addEntity("Selma", "character", []);
+    fail = true;
+    expect(await write).toMatchObject({ success: false });
+    expect(controller.canonTracking().entities.entities.map((e) => e.canonicalName)).toEqual(["Odile"]);
   });
 
   it("keeps what it can of a damaged file, and a copy of the whole", async () => {
@@ -146,15 +219,10 @@ describe("where canon lives", () => {
     expect(stored.get("plugins/bunsho/canon.broken.json")).toBe(raw);
   });
 
-  it("an unknown version is kept too", async () => {
-    const { stored } = await setup({ stored: [[CANON, JSON.stringify({ version: 99, books: [] })]] });
-    expect(stored.has("plugins/bunsho/canon.broken.json")).toBe(true);
-  });
-
   it("finishes a write a crash interrupted", async () => {
     const seen = new Map([[`${CANON}.tmp`, JSON.stringify({ version: 1, books: [] })]]);
     const read = await readCanon({ vault: { adapter: { exists: (p: string) => Promise.resolve(seen.has(p)), read: (p: string) => Promise.resolve(seen.get(p)!) } } } as never, "plugins/bunsho");
-    expect(read).toEqual({ books: [], damaged: false });
+    expect(read).toEqual({ books: [], damaged: false, unreadable: false });
   });
 
   it("a file that cannot be read at all rests the pen, so nothing can replace it", async () => {
@@ -352,7 +420,7 @@ describe("Check canon", () => {
     expect((controller.phase as { message: string }).message).toContain("more than the 1 you confirmed");
   });
 
-  it("out of credits stays a stopped review, with no chapter count", async () => {
+  it("out of credits says so, and leaves no stopped review behind", async () => {
     const { controller } = await checked({ engine: { enforce: true } });
     await declare(controller, "grey");
     const { credits } = controller.canonOffer()!;
@@ -361,6 +429,7 @@ describe("Check canon", () => {
     await controller.checkCanon(credits);
     expect(controller.phase.kind).toBe("error");
     expect((controller.phase as { message: string }).message).toContain("credits");
+    expect(controller.data.stopped).toBeNull();
   });
 });
 
@@ -430,6 +499,50 @@ describe("prune, and Check if fixed", () => {
     const result = await run;
     expect(result.kind).toBe("complete");
     expect(controller.data.fixed).toEqual([]);
+  });
+
+  it("Check if fixed will not close a card whose pin was reverted: nothing was checked against it", async () => {
+    const { controller, notes } = await checked({ notes: { "Book/a.md": "Her eyes were green.", "Book/b.md": "Nothing." } });
+    await controller.addFact(mira(controller).id, "appearance:eye_color", null, "grey");
+    await controller.checkCanon(controller.canonOffer()!.credits);
+    const [card] = controller.currentReview()!.issues;
+    await controller.revertFact(controller.canonConflict(card)!.target);
+    notes["Book/a.md"] = "Her eyes were green, she said.";
+    await controller.refreshScan();
+    expect((await controller.recheck(card.issue_id, controller.recheckQuote(card.issue_id)!)).kind).toBe("complete");
+    expect(controller.data.fixed).toEqual([]);
+  });
+
+  it("Check if fixed will not close a card when a search was skipped", async () => {
+    const { controller, notes } = await checked({ notes: { "Book/a.md": "Her eyes were green.", "Book/b.md": "Nothing." } });
+    await controller.addFact(mira(controller).id, "appearance:eye_color", null, "grey");
+    await controller.checkCanon(controller.canonOffer()!.credits);
+    const [card] = controller.currentReview()!.issues;
+    notes["Book/a.md"] = "Her eyes were grey.";
+    await controller.refreshScan();
+    engine!.options.skipped = 1;
+    expect((await controller.recheck(card.issue_id, controller.recheckQuote(card.issue_id)!)).kind).toBe("complete");
+    expect(controller.data.fixed).toEqual([]);
+  });
+
+  it("a full review whose searches fell short does not stand for the canon", async () => {
+    const { controller } = await checked();
+    await declare(controller, "grey");
+    engine!.options.skipped = 1;
+    await controller.check();
+    expect(controller.canonOffer()).not.toBeNull();
+  });
+
+  it("a rename during Check canon keeps the findings, and the pass is recorded", async () => {
+    const { controller } = await checked({ notes: { "Book/a.md": "Her eyes were green.", "Book/b.md": "Nothing." } });
+    await controller.addFact(mira(controller).id, "appearance:eye_color", null, "green");
+    await controller.addFact(mira(controller).id, "voice", null, "low");
+    const run = controller.checkCanon(controller.canonOffer()!.credits);
+    await checking(controller);
+    await controller.moved("Novel", "Book");
+    await run;
+    expect(controller.data.source?.path).toBe("Novel");
+    expect(controller.currentReview()).not.toBeNull();
   });
 
   it("Check if fixed closes it when the fix is in the prose and the pins held", async () => {

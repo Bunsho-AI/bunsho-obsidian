@@ -40,6 +40,7 @@ async function setup(options: Options) {
         write: async (path: string, text: string) => { stored.set(path, text); await options.onWorldWrite?.(); },
         remove: (path: string) => { stored.delete(path); return Promise.resolve(); },
         mkdir: () => Promise.resolve(),
+        list: (path: string) => Promise.resolve({ files: [...stored.keys()].filter((key) => key.startsWith(`${path}/`) && !key.slice(path.length + 1).includes("/")), folders: [] }),
         rmdir: (path: string) => { for (const key of [...stored.keys()]) if (key.startsWith(`${path}/`)) stored.delete(key); return Promise.resolve(); },
       },
       read: (file: { path: string }) => Promise.resolve(notes[file.path]),

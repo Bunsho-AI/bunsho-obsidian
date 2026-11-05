@@ -77,6 +77,8 @@ export class ContinuityView extends ItemView {
   private composing = false;
   private renderWaiting = false;
   private resetScroll = false;
+  /** What the panel was last about. See the controller's scopeGeneration. */
+  private shownScope = 0;
   private readonly pen: WorldPen;
   /** Why a Revert on the Resolve screen did not land. */
   private revertFailure: { id: string; message: string } | null = null;
@@ -176,6 +178,19 @@ export class ContinuityView extends ItemView {
     root.empty();
     root.addClass("bunsho-panel");
     const c = this.controller;
+    if (c.scopeGeneration !== this.shownScope) {
+      this.shownScope = c.scopeGeneration;
+      this.pen.reset();
+      this.worldSearch = "";
+      this.worldOpen.clear();
+      this.worldHistory.clear();
+      this.resolving = null;
+      this.resolverFeedback = null;
+      this.listFeedback = null;
+      this.revertFailure = null;
+      this.confirming = null;
+      this.spectrum = null;
+    }
 
     if (!c.account.signedIn) {
       SignInPanel(root, { problem: c.account.problem, onSignIn: () => void c.signIn() });
@@ -528,7 +543,7 @@ export class ContinuityView extends ItemView {
     const entities = c.worldRecord();
     // Cast ids mean something within one check. A pen write keeps the same check, and the cards stay as the writer left them.
     if (found !== this.worldShown) {
-      if (found && this.worldShown) this.worldOpen.clear();
+      if (found && this.worldShown) { this.worldOpen.clear(); this.pen.resetCards(); }
       this.worldShown = found;
       this.worldHistory.clear();
     }
@@ -536,7 +551,7 @@ export class ContinuityView extends ItemView {
     const toggle = (set: Set<string>, id: string) => { if (!set.delete(id)) set.add(id); this.render(); };
     const pages = new Map(c.currentReview()?.pages.map((page) => [page.pageId, page.label]));
     WorldList(body, {
-      entities, changes: worldChanges(found ?? []), pen: this.pen.slots(), lapsedTitle: lapsed ? lapsedTitle(lapsed) : null, onRenew: () => window.open(UPGRADE_URL), coordinate: (pageId) => pages.get(pageId) ?? "another chapter", filter: this.worldFilter, search: this.worldSearch, expanded: this.worldOpen, history: this.worldHistory,
+      entities, changes: worldChanges(found ?? []), pen: this.pen.slots(), lapsedTitle: lapsed ? lapsedTitle(lapsed) : null, canonProblem: c.canonProblem, onRenew: () => window.open(UPGRADE_URL), coordinate: (pageId) => pages.get(pageId) ?? "another chapter", filter: this.worldFilter, search: this.worldSearch, expanded: this.worldOpen, history: this.worldHistory,
       gaps: c.worldGaps(), factNote: (row) => c.factNote(row),
       onFilter: (filter) => { this.worldFilter = filter; this.resetScroll = true; this.render(); },
       onSearch: (search) => { this.worldSearch = search; },

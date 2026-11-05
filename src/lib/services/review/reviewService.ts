@@ -122,7 +122,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRun> {
     refundedCredits: result.refundedCredits ?? 0,
     droppedFindings: grounded.droppedIssues,
     unreadPages: result.unreadPages ?? [],
-    capped: (result.stats?.shortlistDropped ?? 0) > 0 || (result.stats?.canonPinsDropped ?? 0) > 0,
+    // Searches that failed count too: a pin nobody searched for proves nothing about a card, or about the canon.
+    capped: (result.stats?.shortlistDropped ?? 0) > 0 || (result.stats?.canonPinsDropped ?? 0) > 0 || (result.stats?.skippedJevRequests ?? 0) > 0,
     cast: result.cast,
     readPolicyId: result.readPolicyId,
     checked: [...whole],

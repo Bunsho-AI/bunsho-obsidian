@@ -13,10 +13,10 @@ import { PipelineV3Client, PipelineV3Error } from "@/lib/contract/pipelineV3Clie
 import { PIPELINE_V3_LIMITS, PIPELINE_V3_PRICE_OP, type ChapterRead, type PipelineV3Health } from "@/lib/contract/pipelineV3.types";
 import { pipelineV3ReviewCredits } from "@/lib/contract/pipelineV3Pricing";
 import { activeNotePosition, selectPassage } from "@/lib/obsidian/editor";
-import { secretSessionStore } from "@/lib/obsidian/secretStore";
+import { secretSessionStore, sessionOwnerStore } from "@/lib/obsidian/secretStore";
 import { readSourceNotes, sourceOptions } from "@/lib/obsidian/vault";
 import { readWorld, removeWorld, writeWorld, type WorldData } from "@/lib/obsidian/worldStore";
-import { accountDir, accountKey, NO_ACCOUNT_STATE, parseLastPlan, parseOtherAccounts, settleAccount } from "@/helpers/accounts";
+import { accountDir, accountKey, followHeld, NO_ACCOUNT_STATE, parseLastPlan, parseOtherAccounts, settleAccount } from "@/helpers/accounts";
 import { SUPPORT_EMAIL, supportMailto } from "@/helpers/support";
 import { projectWorld, type WorldEntity, type WorldRow } from "@/helpers/world";
 import { AUTH_CONFIG } from "@/lib/services/auth/authConfig";
@@ -25,7 +25,7 @@ import { claimStarterCredits, formPost, makeTransport, readBalance, type Connect
 import { readProjectState, registerProject } from "@/lib/services/project/projectService";
 import { canonCredits, MAX_PINS, runCanonReview, runReview, type ReviewOutcome, type ReviewRun } from "@/lib/services/review/reviewService";
 import { lapsedPlan } from "@/helpers/account";
-import { buildCanonConflictView, type CanonConflictView } from "@/helpers/canon/conflict";
+import { buildCanonConflictView, CANON_CONFLICT_ISSUE_TYPE, type CanonConflictView } from "@/helpers/canon/conflict";
 import { capKey, dimensionEntry } from "@/helpers/canon/dimensions";
 import { addAlias, addEntity, addFact, editFact, pinFound, removeEntity, removeFact, renameEntity, unpinFact, type AddEntityOutcome, type CanonTarget, type EntityRef, type FactPatch, type FoundFact, type HandFact, type IdentityResolution, type PenContext, type PenResult } from "@/helpers/canon/pen";
 import { writerPinDigest, writerPins } from "@/helpers/canon/pins";
@@ -95,6 +95,8 @@ type Executed =
   | { kind: "ended" };
 
 const NO_FULL_REVIEW = "Check the whole manuscript first: a chapter can only be checked against a book Bunsho has read.";
+/** Without the writer's pins a review would miss every canon conflict, and retire every canon card. */
+const CANON_UNREADABLE = `Bunsho could not read your canon, so a check could not hold your prose against it. You were not charged. A copy of the file was kept as ${BROKEN} in the plugin's folder: mend it, or remove your canon with Delete my Bunsho data.`;
 const RECHECK_INCOMPLETE = "Recheck incomplete. Existing findings were preserved.";
 const NOT_DETECTED = "Issue no longer detected after targeted recheck.";
 
@@ -139,6 +141,8 @@ export class ContinuityController {
   private recordMemo: { world: WorldEntity[] | null; tracking: CanonTracking; pages: unknown; entities: RecordEntity[] } | null = null;
   private readsMemo: { world: WorldData; policy: string; pages: unknown; complete: boolean } | null = null;
   private worldWrites: Promise<void> = Promise.resolve();
+  /** Bumped when what the panel is about changes hands: another account, deleted data, another book. Whatever a view holds for the old one goes. */
+  scopeGeneration = 0;
   /** Bumped when the local session ends: a review still finishing then keeps nothing. */
   private sessionGen = 0;
   private projected: { world: WorldData; review: ReviewOutcome; orderKey: string; entities: WorldEntity[] } | null = null;
@@ -186,8 +190,9 @@ export class ContinuityController {
   private async loadCanon(): Promise<void> {
     this.canonUnreadable = false;
     try {
-      const { books, damaged } = await readCanon(this.app, this.accountFiles());
+      const { books, damaged, unreadable } = await readCanon(this.app, this.accountFiles());
       this.canonBooks = books;
+      this.canonUnreadable = unreadable;
       if (damaged) new Notice(`Bunsho could not read all of your canon. A copy of the file was kept as ${BROKEN} in the plugin's folder.`);
     } catch (error) {
       console.warn("[Bunsho] could not read canon", error);
@@ -245,18 +250,29 @@ export class ContinuityController {
     const review = this.data.lastReview;
     const { stopped } = this.data;
     const canonMoves = this.canonBooks.some((book) => follow(book.source) !== book.source);
-    const changes = canonMoves || holdsNoteId(this.data.noteIds, oldPath) || [this.data.source, this.reviewing, review?.source, stopped?.source].some((choice) => choice && follow(choice) !== choice);
+    const heldKeys = Object.keys(this.data.otherAccounts);
+    const changes = canonMoves || heldKeys.length > 0 || holdsNoteId(this.data.noteIds, oldPath) || [this.data.source, this.reviewing, review?.source, stopped?.source].some((choice) => choice && follow(choice) !== choice);
     if (!changes) return;
     this.data.noteIds = moveNoteIds(this.data.noteIds, oldPath, path);
     if (this.data.source) this.data.source = follow(this.data.source);
     if (this.reviewing) this.reviewing = follow(this.reviewing);
     if (review) this.data.lastReview = { ...review, source: follow(review.source) };
     if (stopped) this.data.stopped = { ...stopped, source: follow(stopped.source) };
+    this.data.otherAccounts = followHeld(this.data.otherAccounts, follow);
     await this.save();
     if (canonMoves) {
       this.canonBooks = this.canonBooks.map((book) => ({ ...book, source: follow(book.source) }));
       await this.saveCanon().catch((error: unknown) => { console.warn("[Bunsho] could not save canon after a move", error); });
     }
+    // Their records follow too, or an account coming back would find its book gone.
+    for (const key of heldKeys) await this.followHeldCanon(key, follow).catch((error: unknown) => { console.warn("[Bunsho] could not move a held canon", error); });
+  }
+
+  private async followHeldCanon(key: string, follow: (choice: SourceChoice) => SourceChoice): Promise<void> {
+    const dir = accountDir(this.host.dir, { accountKey: key, rootAccount: this.data.rootAccount });
+    const { books, unreadable } = await readCanon(this.app, dir);
+    if (unreadable || !books.some((book) => follow(book.source) !== book.source)) return;
+    await writeCanon(this.app, dir, books.map((book) => ({ ...book, source: follow(book.source) })));
   }
 
   /** A note or folder is gone: a new note at that path is a new note, and the plan will show it. */
@@ -345,7 +361,7 @@ export class ContinuityController {
         }
         next = { signedIn, health, balance, planName: project.planName, problem: null, project: project.state, registeredName: project.registeredName, lapsed: lapsedPlan(project.plan, this.data.lastPlan) };
       } catch (error) {
-        if (error instanceof AuthError && error.code === "signed_out") this.endSession();
+        if (error instanceof AuthError && error.code === "signed_out") { this.endSession(); sessionOwnerStore(this.app).clear(); }
         next = error instanceof AuthError && error.code === "signed_out" ? { ...SIGNED_OUT, problem: error.message }
           : { ...next, planName: this.account.planName, balance: this.account.balance, lapsed: this.account.lapsed, problem: error instanceof PipelineV3Error || error instanceof AuthError ? error.message : "Could not reach Bunsho. Check your connection." };
       }
@@ -395,6 +411,7 @@ export class ContinuityController {
       await this.tokens.signOut();
     } finally {
       this.endSession();
+      sessionOwnerStore(this.app).clear();
     }
     await this.refreshAccount();
   }
@@ -413,13 +430,15 @@ export class ContinuityController {
    * account's to send. Its data is kept for when it returns. Runs before anything the panel shows or the engine is told.
    */
   private async settleOwner(): Promise<void> {
-    const uid = this.devUid ?? uidOfToken(await this.tokens.idToken());
-    if (!uid) return;
-    const { next, changed, swapped } = settleAccount(this.data, accountKey(uid));
+    const key = await this.sessionKey();
+    if (!key) return;
+    const { next, changed, swapped } = settleAccount(this.data, key);
     if (!changed) return;
     this.data = next;
     if (swapped) {
       this.starterClaimed = false;
+      this.scopeGeneration++;
+      if (this.phase.kind === "error") this.phase = { kind: "idle" };
       this.projected = null;
       this.recordMemo = null;
       this.world = await readWorld(this.app, this.accountFiles());
@@ -427,6 +446,26 @@ export class ContinuityController {
     }
     await this.save();
     if (swapped) await this.refreshScan();
+  }
+
+  /**
+   * Whose session this is. Read from the token when it can be, and remembered beside it, so a writer offline still sees their own
+   * data, and a synced data.json naming someone else never shows them that person's. A session it cannot name at all is told apart
+   * from a passing failure by what is remembered.
+   */
+  private async sessionKey(): Promise<string | null> {
+    if (this.devUid) return accountKey(this.devUid);
+    const owner = sessionOwnerStore(this.app);
+    try {
+      const uid = uidOfToken(await this.tokens.idToken());
+      if (uid) { const key = accountKey(uid); owner.set(key); return key; }
+    } catch (error) {
+      if (error instanceof AuthError && error.code === "signed_out") throw error;
+      const known = owner.get();
+      if (known) return known;
+      throw error;
+    }
+    return owner.get();
   }
 
   /** Other accounts have left data on this vault: the delete's confirm says it goes too. */
@@ -444,6 +483,7 @@ export class ContinuityController {
     this.canonBooks = [];
     this.canonUnreadable = false;
     this.recordMemo = null;
+    this.scopeGeneration++;
     const dir = this.host.dir;
     Object.assign(this.data, NO_ACCOUNT_STATE, { noteIds: {}, accountKey: null, rootAccount: null, otherAccounts: {} });
     this.scan = { status: "no_source" };
@@ -510,6 +550,7 @@ export class ContinuityController {
   private whyNot(items: readonly PlannedItem[], health: PipelineV3Health): string | null {
     const quote = planQuote(items);
     if (quote.units === 0) return "Nothing is ticked in the reading plan.";
+    if (this.canonUnreadable) return CANON_UNREADABLE;
     if (this.pins().length > MAX_PINS) return this.tooManyPins();
     if (quote.problems.length > 0) return quote.problems[0];
     if (quote.hasParts && !health.readingParts) return "Part of this is too long to read in one go, and the Bunsho service cannot read it in pieces yet. You were not charged.";
@@ -558,7 +599,7 @@ export class ContinuityController {
       if (!choice) return this.idle();
       const same = this.data.source?.kind === choice.kind && this.data.source.path === choice.path;
       this.data.source = choice;
-      if (!same) this.data.plan = null;
+      if (!same) { this.data.plan = null; this.scopeGeneration++; }
       await this.save();
       const scan = await this.freshScan();
       this.idle();
@@ -686,6 +727,7 @@ export class ContinuityController {
       const revs = new Map(scan.pages.map((page) => [page.pageId, page.rev]));
       const edited = issue?.citations.some((citation) => revs.get(citation.page_id) !== citation.source_ref?.rev) ?? false;
       const pinsBefore = writerPinDigest(this.canonTracking());
+      const held = this.pinStillSent(issue);
 
       const done = await this.execute(scan.items, scan.source, health, quoted, scope, "check");
       if (done.kind === "ended") { this.idle(); return { kind: "none", message: "" }; }
@@ -696,7 +738,7 @@ export class ContinuityController {
       }
       const { run, merged, scan: after } = done;
       const proven = merged.failed.length === 0 && !merged.incomplete && !merged.stale && !run.capped && run.lostFindings === 0
-        && after?.status === "ready" && after.snapshotId === run.snapshotId && !merged.survivors.has(issueId) && edited
+        && after?.status === "ready" && after.snapshotId === run.snapshotId && !merged.survivors.has(issueId) && edited && held
         // The writer's declarations are part of what a check is against: pins that moved prove nothing about this card.
         && writerPinDigest(this.canonTracking()) === pinsBefore && await this.policyStands(health);
       if (session !== this.sessionGen) { this.idle(); return { kind: "none", message: "" }; } // signed out during that last question
@@ -712,6 +754,15 @@ export class ContinuityController {
       this.idle();
       return incomplete(error instanceof Error ? error.message : "The check failed.");
     }
+  }
+
+  /** A canon card can only be proved gone by a check that carried its pin. Any other card has no pin to carry. */
+  private pinStillSent(issue: EngineIssue | undefined): boolean {
+    if (issue?.type !== CANON_CONFLICT_ISSUE_TYPE) return true;
+    const view = this.canonConflict(issue);
+    if (!view) return false;
+    const { pinnedStateId, entityId, dimension, pinnedValue } = view.context;
+    return this.pins().some((pin) => pin.pinId === pinnedStateId && pin.entityId === entityId && pin.dimension === dimension && pin.value === pinnedValue);
   }
 
   /** The engine still reviews under the policy this ran under. An answer that cannot be had proves nothing. */
@@ -743,6 +794,7 @@ export class ContinuityController {
 
   /** whyNot, for a review that sends only some chapters whole: the rest are passages, listed but never charged. */
   private whyNotScoped(scan: ReadyScan, scope: ReadonlySet<string>, health: PipelineV3Health, quoted: number): string | null {
+    if (this.canonUnreadable) return CANON_UNREADABLE;
     if (this.pins().length > MAX_PINS) return this.tooManyPins();
     const { units } = buildUnits(scan.items, () => "");
     if (units.length > PIPELINE_V3_LIMITS.maxPages) return planQuote(scan.items).problems[0] ?? null;
@@ -760,7 +812,7 @@ export class ContinuityController {
     if (done.kind === "failed") return this.reviewFailed(done.error, action, source, scope?.size ?? items.filter((item) => item.included).length, credits);
     const saved = await this.persist(done.merged, done.run, items, scope, credits);
     // A whole-book review that finished checked every pin it carried, which may be fewer than there are now.
-    if (saved && !scope && !done.merged.incomplete && !done.merged.stale && !done.run.capped) await this.recordCanonChecked(done.run.source, done.pinDigest);
+    if (saved && !scope && !done.merged.incomplete && !done.merged.stale && !done.run.capped && done.run.lostFindings === 0) await this.recordCanonChecked(done.merged.review.source, done.pinDigest);
     this.idle();
     await this.refreshAccount();
   }
@@ -866,9 +918,9 @@ export class ContinuityController {
       try { await this.save(); } catch (saveError) { console.warn("[Bunsho] could not save", saveError); }
     };
     // Check canon marks nothing checked, so it says nothing about chapters. A cancelled one the engine did not charge leaves nothing to say.
-    if (action.kind === "canon" && error instanceof PipelineV3Error && error.code === "cancelled") {
-      if (error.detail.charged === false) this.idle();
-      else this.setPhase({ kind: "error", message: error.message, charged: true, action });
+    if (action.kind === "canon" && error instanceof PipelineV3Error && (error.code === "cancelled" || error.code === "insufficient_credits")) {
+      if (error.code === "cancelled" && error.detail.charged === false) this.idle();
+      else this.setPhase({ kind: "error", message: error.message, charged: error.code === "cancelled", action });
       await this.refreshAccount();
       return;
     }
@@ -1015,12 +1067,16 @@ export class ContinuityController {
   private tooManyPins(): string { return `Bunsho can check up to ${MAX_PINS} declared facts at a time, and you have ${formatNumber(this.pins().length)}. Revert some, then try again. You were not charged.`; }
 
   private saveCanon(): Promise<void> {
+    if (this.canonUnreadable) return Promise.reject(new Error("canon.json could not be read"));
     const dir = this.accountFiles();
     const books = this.canonBooks;
     const write = this.canonWrites.catch(() => undefined).then(() => writeCanon(this.app, dir, books));
     this.canonWrites = write;
     return write;
   }
+
+  /** canon.json could not be read, in the writer's words. */
+  get canonProblem(): string | null { return this.canonUnreadable ? CANON_UNREADABLE : null; }
 
   /** The pen rests while a plan has lapsed: everything declared still reads. */
   get penOpen(): boolean { return this.account.lapsed === null && !this.canonUnreadable; }
@@ -1048,13 +1104,14 @@ export class ContinuityController {
       const tracking = book?.tracking ?? emptyCanon();
       const result = apply(tracking, { now: new Date().toISOString(), found: foundEntities(this.worldEntities() ?? [], tracking) });
       if (!result.success || !result.changed) return result;
-      const before = this.canonBooks;
-      this.canonBooks = book ? before.map((b) => (b === book ? { ...b, tracking: result.tracking } : b)) : [...before, { source, tracking: result.tracking, checked: null }];
+      const written: CanonBook = book ? { ...book, tracking: result.tracking } : { source, tracking: result.tracking, checked: null };
+      this.canonBooks = book ? this.canonBooks.map((b) => (b === book ? written : b)) : [...this.canonBooks, written];
       try {
         await this.saveCanon();
       } catch (error) {
         console.warn("[Bunsho] could not save canon", error);
-        this.canonBooks = before;
+        // Only this write goes back: anything else that happened meanwhile stands.
+        this.canonBooks = book ? this.canonBooks.map((b) => (b === written ? book : b)) : this.canonBooks.filter((b) => b !== written);
         return failed();
       }
       // A Free account's story record lives in its one project: its first declaration makes this vault that project, as a first check does.
@@ -1206,13 +1263,14 @@ export class ContinuityController {
         if (session !== this.sessionGen) return this.idle();
         const current = new Map(now?.status === "ready" ? now.pages.map((page) => [page.pageId, page]) : []);
         const edited = new Set(run.pages.filter((page) => { const moved = current.get(page.pageId); return !moved || moved.rev !== page.rev || moved.order !== page.order; }).map((page) => page.pageId));
-        const merged = mergeCanonPass({ prior: review, issues: run.issues, edited, whole: !run.capped && !run.skipped && run.lostFindings === 0, statusOf: (id) => this.statusOf(id), texts: run.texts, pages: run.pages });
+        // The review as it stands: the writer may have renamed the folder while this ran.
+        const merged = mergeCanonPass({ prior: this.currentReview() ?? review, issues: run.issues, edited, whole: !run.capped && !run.skipped && run.lostFindings === 0, statusOf: (id) => this.statusOf(id), texts: run.texts, pages: run.pages });
         const reopened = new Set(merged.reopened);
         this.data.fixed = this.data.fixed.filter((id) => !reopened.has(id));
         this.data.lastReview = merged.review;
         let saved = true;
         try { await this.save(); } catch (error) { saved = false; console.warn("[Bunsho] could not save the canon findings", error); }
-        if (saved && merged.complete) await this.recordCanonChecked(source, pinDigest);
+        if (saved && merged.complete) await this.recordCanonChecked(merged.review.source, pinDigest);
         const message = saved ? merged.message : CANON_SAVE_MESSAGE;
         if (message) this.setPhase({ kind: "error", message, charged: true, action: { kind: "canon" } });
         else this.idle();

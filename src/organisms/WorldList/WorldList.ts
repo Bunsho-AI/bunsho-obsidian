@@ -65,6 +65,8 @@ export interface WorldListProps {
   pen: WorldListPen | null;
   /** The plan that ended, as its sentence. */
   lapsedTitle: string | null;
+  /** canon.json could not be read: what to do about it. */
+  canonProblem: string | null;
   onRenew: () => void;
 }
 
@@ -137,6 +139,7 @@ export function WorldList(parent: HTMLElement, props: WorldListProps): void {
   const count = (filter: WorldFilter) => (filter === "events" ? props.changes.length : filterWorld(props.entities, filter, "").length);
   PanelTabs(parent, { cls: "is-filter", active: props.filter, onSelect: props.onFilter, tabs: FILTERS.map((f) => ({ id: f.id, label: `${f.label} ${count(f.id)}` })) });
   if (props.lapsedTitle) CanonReadOnlyCard(parent, { title: props.lapsedTitle, onRenew: props.onRenew });
+  if (props.canonProblem) parent.createDiv({ cls: "bunsho-problem bunsho-note", text: props.canonProblem });
   if (props.pen?.failure) parent.createDiv({ cls: "bunsho-problem bunsho-note", text: props.pen.failure, attr: { role: "status" } });
   if (props.gaps.length > 0) {
     const named = props.gaps.slice(0, 3).join(", ");

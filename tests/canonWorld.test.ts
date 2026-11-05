@@ -46,6 +46,9 @@ describe("who a record entity is", () => {
       expect(linkEntities(worldOf([member("r0", name, [0])]), canon([entity("ent_a", name)])).get("ent_a")?.id).toBe("r0");
     }
   });
+  it("a hyphen is part of a name: Ann-Marie is not Ann Marie", () => {
+    expect(linkEntities(worldOf([member("r0", "Ann Marie", [0])]), canon([entity("ent_a", "Ann-Marie")])).size).toBe(0);
+  });
   it("two non-Latin names never collapse into one", () => {
     const world = worldOf([member("r0", "ミラ", [0]), member("r1", "セルマ", [0])]);
     expect(linkEntities(world, canon([entity("ent_a", "ミラ"), entity("ent_b", "セルマ")])).get("ent_b")?.id).toBe("r1");

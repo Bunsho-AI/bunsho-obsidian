@@ -50,8 +50,11 @@ export class WorldPen {
 
   constructor(private readonly controller: ContinuityController, private readonly host: WorldPenHost) {}
 
-  /** A writer who was typing keeps it through a change of tab. Another book's cards are another matter. */
-  reset(): void { this.composerDraft = null; this.factDraft = null; this.aliasDraft = null; this.renameDraft = null; this.editDraft = null; this.failure = null; }
+  /** Another account, deleted data or another book: nothing typed for the last one stays. */
+  reset(): void { this.composerDraft = null; this.resetCards(); }
+
+  /** A new check: a card's id is a cast id, and may be someone else's now. */
+  resetCards(): void { this.factDraft = null; this.aliasDraft = null; this.renameDraft = null; this.editDraft = null; this.failure = null; }
 
   private coordinate(pageId: string | undefined): string | null {
     return pageId ? this.controller.currentReview()?.pages.find((page) => page.pageId === pageId)?.label ?? null : null;
@@ -171,7 +174,9 @@ export class WorldPen {
     if (!text) { this.aliasDraft = null; this.host.redraw(`alias:${draft.entityId}`); return; }
     const result = await this.controller.addAlias(draft.entityId, text, resolution, matched?.ref);
     this.report(result);
-    if (!result.success && result.code === "IDENTITY_AMBIGUOUS" && result.match) { draft.identity = result.match; this.host.redraw(`alias-field:${draft.entityId}`); return; }
+    if (!result.success && result.code === "IDENTITY_AMBIGUOUS" && result.match) draft.identity = result.match;
+    // A write that did not land keeps what was typed.
+    if (!result.success) { this.host.redraw(`alias-field:${draft.entityId}`); return; }
     this.aliasDraft = null;
     this.host.redraw(`alias:${draft.entityId}`);
   }
@@ -211,9 +216,10 @@ export class WorldPen {
           onSave: () => {
             const value = draft.value.trim();
             if (!value || value === row.value) { close(`pen:Edit:${row.id}`); return; }
-            void c.editFact(target, target.kind === "state" ? { value } : { proposition: value }).then((result) => { this.report(result); close(`pen:Edit:${row.id}`); });
+            // A write that did not land keeps what was typed.
+            void c.editFact(target, target.kind === "state" ? { value } : { proposition: value }).then((result) => { this.report(result); if (result.success) close(`pen:Edit:${row.id}`); else this.host.redraw(`edit:${row.id}:value`); });
           },
-          onRemove: () => void c.removeFact(target).then((result) => { this.report(result); close(`addfact:${entity.id}`); }) });
+          onRemove: () => void c.removeFact(target).then((result) => { this.report(result); if (result.success) close(`addfact:${entity.id}`); else this.host.redraw(`edit:${row.id}:remove`); }) });
         return true;
       },
       openAlias: (entity) => { this.closeCardStates(); this.aliasDraft = { entityId: entity.id, draft: "", identity: null }; this.host.redraw(`alias-field:${entity.id}`); },

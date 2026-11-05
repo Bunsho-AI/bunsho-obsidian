@@ -4,13 +4,13 @@
  * grouped by origin: the face and the verb say which is which. Pure.
  *
  * A record entity meets a cast member only through a name exactly one of each holds, never through a description both could carry
- * or a guess. When that fails they stay two cards, and the writer can see it. Names compare in any script.
+ * or a guess. When that fails they stay two cards, and the writer can see it. Names compare by the pen's own identity, in any script.
  */
 import { dimensionLabel, parseDimensionKey, propositionKeyOf } from "@/helpers/canon/dimensions";
 import { dimensionSubject, type CanonTarget, type EntityRef, type FoundEntity } from "@/helpers/canon/pen";
 import { isDesktopMintedId } from "@/helpers/canon/ids";
-import { isWriterSource, MAX_PROPOSITION_KEY_CHARS, type CanonEntity, type CanonKnowledge, type CanonSource, type CanonState, type CanonTracking, type PageSource } from "@/helpers/canon/record";
-import { nameKey, tierOf, type WorldEntity, type WorldEntityType, type WorldRow, type WorldTier } from "@/helpers/world";
+import { isWriterSource, MAX_PROPOSITION_KEY_CHARS, nfcKey, type CanonEntity, type CanonKnowledge, type CanonSource, type CanonState, type CanonTracking, type PageSource } from "@/helpers/canon/record";
+import { tierOf, type WorldEntity, type WorldEntityType, type WorldRow, type WorldTier } from "@/helpers/world";
 
 export type PenVerb = "Make canon" | "Revert" | "Edit";
 
@@ -51,10 +51,10 @@ const typed = (type: string, key: string): string => `${type}\u0000${key}`;
 
 /** Which cast member each record entity is, where exactly one of each holds a name of the same kind. */
 export function linkEntities(world: readonly WorldEntity[], tracking: CanonTracking): Map<string, WorldEntity> {
-  const memberKeys = (member: WorldEntity): string[] => [...new Set([member.name, ...member.properNames].map(nameKey).filter(Boolean))];
+  const memberKeys = (member: WorldEntity): string[] => [...new Set([member.name, ...member.properNames].map(nfcKey).filter(Boolean))];
   const holders = new Map<string, WorldEntity[]>();
   for (const member of world) for (const key of memberKeys(member)) holders.set(typed(member.type, key), [...(holders.get(typed(member.type, key)) ?? []), member]);
-  const entityKeys = (entity: CanonEntity): string[] => [...new Set([entity.canonicalName, ...entity.aliases.filter((a) => a.grep).map((a) => a.text)].map(nameKey).filter(Boolean))];
+  const entityKeys = (entity: CanonEntity): string[] => [...new Set([entity.canonicalName, ...entity.aliases.filter((a) => a.grep).map((a) => a.text)].map(nfcKey).filter(Boolean))];
   const claimedBy = new Map<string, string[]>();
   const active = tracking.entities.entities.filter((entity) => entity.status === "active");
   for (const entity of active) for (const key of entityKeys(entity)) claimedBy.set(typed(entity.type, key), [...(claimedBy.get(typed(entity.type, key)) ?? []), entity.entityId]);
@@ -67,7 +67,7 @@ export function linkEntities(world: readonly WorldEntity[], tracking: CanonTrack
       return members.length === 1 && claimedBy.get(typed(entity.type, key))?.length === 1 ? members : [];
     });
     const unique = [...new Set(matches)];
-    const member = unique.length === 1 ? unique[0] : unique.find((m) => nameKey(m.name) === nameKey(entity.canonicalName));
+    const member = unique.length === 1 ? unique[0] : unique.find((m) => nfcKey(m.name) === nfcKey(entity.canonicalName));
     if (member && !taken.has(member.id)) { links.set(entity.entityId, member); taken.add(member.id); }
   }
   return links;
@@ -137,7 +137,7 @@ export function mergeRecord(world: readonly WorldEntity[], tracking: CanonTracki
 
     const name = canon?.canonicalName ?? member?.name ?? "";
     const aliases = [...new Map([...(canon?.aliases.map((a) => a.text) ?? []), ...(member?.aliases ?? []), ...(canon && member ? [member.name] : [])]
-      .filter((text) => nameKey(text) !== nameKey(name)).map((text) => [nameKey(text) || text, text])).values()];
+      .filter((text) => nfcKey(text) !== nfcKey(name)).map((text) => [nfcKey(text) || text, text])).values()];
     const scenes = member?.scenes ?? 0;
     const type = (canon?.type ?? member?.type ?? "character") as WorldEntityType;
     const writerTouched = Boolean(canon) && (isDesktopMintedId(canon?.entityId ?? "") || (canon?.provenance.some(isWriterSource) ?? false));

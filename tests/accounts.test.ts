@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accountDir, accountKey, parseOtherAccounts, settleAccount, NO_ACCOUNT_STATE, type AccountOwned } from "@/helpers/accounts";
+import { accountDir, accountKey, followHeld, parseOtherAccounts, settleAccount, NO_ACCOUNT_STATE, type AccountOwned } from "@/helpers/accounts";
 
 const owned = (over: Partial<AccountOwned> = {}): AccountOwned => ({ ...NO_ACCOUNT_STATE, ...over });
 const data = (over: Partial<AccountOwned> & { accountKey?: string | null; rootAccount?: string | null; otherAccounts?: Record<string, AccountOwned> } = {}) => ({
@@ -58,6 +58,16 @@ describe("whose data this is", () => {
 
   it("never builds a path from a key that is not one of ours", () => {
     expect(accountDir("plugins/bunsho", { accountKey: "../../evil", rootAccount: "a".repeat(24) })).toBe("plugins/bunsho");
+  });
+
+  it("a rename reaches what another account holds, and leaves other paths alone", () => {
+    const held = owned({ source: { kind: "folder", path: "Book" }, lastReview: { source: { kind: "folder", path: "Book" } } as never, stopped: { source: { kind: "folder", path: "Other" } } as never });
+    const follow = <T extends { path: string }>(c: T): T => (c.path === "Book" ? { ...c, path: "Novel" } : c);
+    const { k } = followHeld({ k: held }, follow);
+    expect(k.source?.path).toBe("Novel");
+    expect(k.lastReview?.source.path).toBe("Novel");
+    expect(k.stopped?.source.path).toBe("Other");
+    expect(followHeld({ k: owned() }, follow).k).toEqual(owned());
   });
 
   it("reads held data from a hand-edited file only when it is the right shape", () => {
