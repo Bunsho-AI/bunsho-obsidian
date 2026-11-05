@@ -42,6 +42,16 @@ The plugin does nothing until you sign in: the panel and settings show only the 
 
 Bunsho uses AI and can make mistakes. Check findings against your story.
 
+After that first check of the whole book, Bunsho can check parts of it, each priced before you press anything:
+
+- **Check chapter** checks the chapter your cursor is in against the rest of the story. It asks first and names the price.
+- **Review changed chapters** appears when chapters have changed, or moved, since their last check. The price is on the button. It also clears findings that have gone.
+- **Check if fixed**, on a finding's Resolve screen, reads every chapter the finding cites again. The finding closes only if the check finishes, nothing changed while it ran, you changed one of those chapters, and the problem does not come back. If it comes back in a reworded sentence, it is still the same finding.
+
+A check is charged for the text it reads in full. If a review stops, your findings stay as they were, and a retry is a new review, charged again.
+
+Filter findings by kind with the chips above the list, or use **Jump to issue**. Both are free.
+
 The **World** tab lists the people, places and things a check found, with the passage each fact comes from. It costs nothing extra, and it is read-only for now.
 
 On the free plan your vault is your one project. You can change what it reads at any time, and you can switch your free project to another vault as often as you like.
@@ -52,9 +62,9 @@ Checking only ever runs when you press the button. Writing is never metered.
 
 - **Account required.** Checking needs a Bunsho account and credits.
 - **Payment.** A check is paid for with Bunsho credits. Credits are bought at bunsho.io, not inside the plugin.
-- **Network use.** When you confirm a check, the plugin sends the text of the notes and sections on your reading plan to the Bunsho service (`engine.bunsho.io`) over an encrypted connection to be checked, and receives the findings. While you are signed in it also reads your credit balance and the current price from the Bunsho service (when Obsidian starts, when the panel opens and after a check), and it contacts Google and Firebase to sign you in and keep you signed in. Sign-in opens a page served from your own computer in your browser; that page loads Firebase's sign-in code from Google. Requests carry a random install id generated on this machine and the plugin version; the install id protects the free starter allowance from abuse. Your notes are not sent at any other time.
+- **Network use.** When you confirm a check, the plugin sends the text of the notes and sections on your reading plan to the Bunsho service (`engine.bunsho.io`) over an encrypted connection to be checked, and receives the findings. A check of the whole book sends all of that text. A check of one chapter, of changed chapters or Check if fixed sends those chapters in full, the paragraphs of other chapters that mention the same people, and what earlier checks read from your book (facts, quotes and names). While you are signed in it also reads your credit balance and the current price from the Bunsho service (when Obsidian starts, when the panel opens and after a check), and it contacts Google and Firebase to sign you in and keep you signed in. Sign-in opens a page served from your own computer in your browser; that page loads Firebase's sign-in code from Google. Requests carry a random install id generated on this machine and the plugin version; the install id protects the free starter allowance from abuse. Your notes are not sent at any other time.
 - **Telemetry.** The plugin sends no analytics or telemetry. The Bunsho service keeps the account and billing records needed to charge credits; see the privacy policy at https://bunsho.io/privacy.
-- **Stored on your machine.** Findings and dismissals live in the plugin's `data.json`, and the World tab's facts and quotes in `world.json` beside it, in your vault's plugin folder. Your sign-in is kept in Obsidian's secret storage, never in `data.json`.
+- **Stored on your machine.** Findings and dismissals live in the plugin's `data.json`, and what checks read (facts, quotes and the cast, used by the World tab and sent back on chapter checks) in `world.json` beside it, in your vault's plugin folder. Your sign-in is kept in Obsidian's secret storage, never in `data.json`.
 - **Open source.** The plugin is a thin client under the MIT license. Detection runs in the Bunsho service.
 
 ## Development
@@ -62,7 +72,8 @@ Checking only ever runs when you press the button. Writing is never metered.
 ```
 npm install
 npm run lint        # Obsidian's official plugin guidelines linter (eslint-plugin-obsidianmd)
-npm test            # unit tests and an integration test against a mock engine
+npm test            # unit tests and integration tests against a mock engine
+npm run test:coverage
 npm run build       # typecheck + bundle main.js
 node scripts/mock-engine.mjs 8799   # a stand-in engine, no model credits
 ```
@@ -78,15 +89,15 @@ Atomic layers. A file may import from layers below it in this list, never above:
 ```
 src/
   main.ts            plugin entry: icon, view, commands, settings; hands everything to the controller
-  pages/             what Obsidian mounts: ContinuityView (panel), SettingsTab, ConfirmCheckModal
-  organisms/         SignInPanel, ManuscriptHelp, FindingCard, FindingsList
-  molecules/         BrandHeader, StatusRow, GroupHeader, Passage, AlertCard, EmptyState
+  pages/             what Obsidian mounts: ContinuityView (panel), SettingsTab, ConfirmCheckModal, JumpPickerModal
+  organisms/         SignInPanel, ManuscriptHelp, FindingCard, FindingsList, ResolverPanel, JumpPicker
+  molecules/         BrandHeader, StatusRow, GroupHeader, Passage, AlertCard, EmptyState, SpectrumChips, SpectrumPill, CheckChapterControl, ChangedChaptersRow
   atoms/             TextAction, FillButton, QuietButton, Fact, SeverityLabel, BunshoWordmark, GoogleSignInButton
   controllers/       ContinuityController: state and actions (the "hooks" layer for a non-React app)
   types/             shared state and persisted-data types
   lib/obsidian/      Obsidian API glue: vault reading, secret storage, selecting a passage
   lib/services/      engine access: auth (Google sign-in), engine (HTTP), review (WebSocket), project (free plan)
-  helpers/           Bunsho domain logic, pure: chapters, quote location, progress, one-project state
+  helpers/           Bunsho domain logic, pure: chapters, quote location, progress, one-project state, the review merge, passages
   lib/contract/      the engine wire contract, copied from the desktop app (change with the engine)
   assets/            the wordmark images (inlined into main.js), the ribbon icon and Google's G (SVG)
   utils/             generic pure functions: markdown projection, hashing, formatting, URLs
