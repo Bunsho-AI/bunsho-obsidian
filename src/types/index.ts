@@ -2,6 +2,7 @@
 import type { PageMeta, PlannedItem, SavedPlan, SourceChoice } from "@/helpers/sources";
 import type { ProjectState } from "@/helpers/project";
 import type { PipelineV3Health } from "@/lib/contract/pipelineV3.types";
+import type { AccountOwned } from "@/helpers/accounts";
 import type { ReviewOutcome } from "@/lib/services/review/reviewService";
 
 export interface PluginData {
@@ -24,6 +25,14 @@ export interface PluginData {
   lastReview: ReviewOutcome | null;
   /** The last review stopped before it checked everything it was asked to. */
   stopped: StoppedReview | null;
+  /** The paid plan this account was last seen on (helpers/accounts.ts). */
+  lastPlan: AccountOwned["lastPlan"];
+  /** Whose findings, decisions, World and canon these are, as a hash. Null until an account signs in. */
+  accountKey: string | null;
+  /** The account whose files sit beside data.json. Any other's are under accounts/<key>/. */
+  rootAccount: string | null;
+  /** What other accounts left on this vault, kept whole for when they sign back in. */
+  otherAccounts: Record<string, AccountOwned>;
 }
 
 /** What a review that did not finish read, always by plan item. */

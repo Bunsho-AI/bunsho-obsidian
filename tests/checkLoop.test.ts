@@ -35,10 +35,12 @@ async function setup(options: Options) {
       getFileByPath: (path: string) => (notes[path] === undefined ? null : { path }),
       getFolderByPath: (path: string) => (Object.keys(notes).some((n) => n.startsWith(`${path}/`)) ? { path } : null),
       adapter: {
-        exists: (path: string) => Promise.resolve(stored.has(path)),
+        exists: (path: string) => Promise.resolve(stored.has(path) || [...stored.keys()].some((key) => key.startsWith(`${path}/`))),
         read: (path: string) => Promise.resolve(stored.get(path) ?? ""),
         write: async (path: string, text: string) => { stored.set(path, text); await options.onWorldWrite?.(); },
         remove: (path: string) => { stored.delete(path); return Promise.resolve(); },
+        mkdir: () => Promise.resolve(),
+        rmdir: (path: string) => { for (const key of [...stored.keys()]) if (key.startsWith(`${path}/`)) stored.delete(key); return Promise.resolve(); },
       },
       read: (file: { path: string }) => Promise.resolve(notes[file.path]),
     },
@@ -510,7 +512,7 @@ describe("check if fixed: a false fixed is the worst outcome", () => {
     await rescan(controller);
     signOut = () => controller.signOut();
     await controller.recheck(id, 36);
-    expect(data().lastReview).toBeNull();
+    expect(data().lastReview?.issues.map((issue) => issue.issue_id)).toContain(id);
     expect(data().fixed).toEqual([]);
   });
 
@@ -716,15 +718,16 @@ describe("stopped reviews", () => {
     expect((controller.phase as { action?: unknown }).action).toBeUndefined();
   });
 
-  it("signing out takes the stopped review and closed cards with it", async () => {
+  it("signing out keeps the stopped review", async () => {
     const { controller, notes } = await checked();
     notes["Book/c.md"] = "Something else happens here.";
     await rescan(controller);
     engine!.options.unread = "all";
     await controller.reviewChanged(36);
+    const { stopped } = controller.data;
+    expect(stopped).not.toBeNull();
     await controller.signOut();
-    expect(controller.data.stopped).toBeNull();
-    expect(controller.data.fixed).toEqual([]);
+    expect(controller.data.stopped).toEqual(stopped);
   });
 
   it("damaged saved state does not reach the panel", async () => {

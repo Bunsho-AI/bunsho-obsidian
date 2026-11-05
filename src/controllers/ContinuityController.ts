@@ -16,10 +16,11 @@ import { activeNotePosition, selectPassage } from "@/lib/obsidian/editor";
 import { secretSessionStore } from "@/lib/obsidian/secretStore";
 import { readSourceNotes, sourceOptions } from "@/lib/obsidian/vault";
 import { readWorld, removeWorld, writeWorld, type WorldData } from "@/lib/obsidian/worldStore";
+import { accountDir, accountKey, NO_ACCOUNT_STATE, parseLastPlan, parseOtherAccounts, settleAccount } from "@/helpers/accounts";
 import { SUPPORT_EMAIL, supportMailto } from "@/helpers/support";
 import { projectWorld, type WorldEntity, type WorldRow } from "@/helpers/world";
 import { AUTH_CONFIG } from "@/lib/services/auth/authConfig";
-import { AuthError, TokenSource } from "@/lib/services/auth/authService";
+import { AuthError, TokenSource, uidOfToken } from "@/lib/services/auth/authService";
 import { claimStarterCredits, formPost, makeTransport, readBalance, type ConnectionOptions } from "@/lib/services/engine/engineService";
 import { readProjectState, registerProject } from "@/lib/services/project/projectService";
 import { runReview, type ReviewOutcome, type ReviewRun } from "@/lib/services/review/reviewService";
@@ -136,8 +137,8 @@ export class ContinuityController {
     const saved = (await this.host.loadData()) as (Partial<PluginData> & { manuscriptFolder?: unknown }) | null;
     const { manuscriptFolder, ...rest } = saved ?? {};
     this.data = {
-      source: null, plan: null, noteIds: {}, engineUrl: AUTH_CONFIG.engineUrl, devUid: "",
-      installId: crypto.randomUUID(), workspaceId: crypto.randomUUID(), dismissed: [], deliberate: [], fixed: [], lastReview: null, stopped: null, ...rest,
+      noteIds: {}, engineUrl: AUTH_CONFIG.engineUrl, devUid: "",
+      installId: crypto.randomUUID(), workspaceId: crypto.randomUUID(), ...NO_ACCOUNT_STATE, accountKey: null, rootAccount: null, otherAccounts: {}, ...rest,
     };
     // Before the reading plan: the folder setting becomes the picked source, and a review from then cannot be mapped back.
     const folder = typeof manuscriptFolder === "string" ? manuscriptFolder.trim().replace(/^\/+|\/+$/gu, "") : "";
@@ -151,10 +152,15 @@ export class ContinuityController {
     if (this.data.lastReview && !Array.isArray(this.data.lastReview.issues)) this.data.lastReview = null;
     if (this.data.lastReview) this.data.lastReview = { ...this.data.lastReview, ledger: ledgerOf(this.data.lastReview) };
     if (!validStopped(this.data.stopped)) this.data.stopped = null;
+    this.data.lastPlan = parseLastPlan(this.data.lastPlan);
+    this.data.otherAccounts = parseOtherAccounts(this.data.otherAccounts);
+    const key = (value: unknown): string | null => (typeof value === "string" && /^[0-9a-f]{24}$/u.test(value) ? value : null);
+    this.data.accountKey = key(this.data.accountKey);
+    this.data.rootAccount = key(this.data.rootAccount);
     // A vault's data.json can be synced or copied from elsewhere: never send a token to an address that is not ours to trust.
     if (!acceptableEngineUrl(this.data.engineUrl)) this.data.engineUrl = AUTH_CONFIG.engineUrl;
     await this.save();
-    this.world = await readWorld(this.app, this.host.dir);
+    this.world = await readWorld(this.app, this.accountFiles());
   }
 
   dispose(): void {
@@ -174,6 +180,8 @@ export class ContinuityController {
   get busy(): boolean { return this.phase.kind !== "idle" && this.phase.kind !== "error"; }
 
   private get app(): App { return this.host.app; }
+  /** Where the signed-in account's world.json and canon.json are. */
+  private accountFiles(): string { return accountDir(this.host.dir, this.data); }
   private get devUid(): string | undefined { return isLocalEngine(this.data.engineUrl) && this.data.devUid ? this.data.devUid : undefined; }
 
   private connection(): ConnectionOptions {
@@ -286,6 +294,7 @@ export class ContinuityController {
     let next: Account = { ...SIGNED_OUT, signedIn };
     if (signedIn) {
       try {
+        await this.settleOwner();
         // Before the balance read, so a writer who has only ever used Obsidian starts with the starter credits.
         if (!this.starterClaimed) this.starterClaimed = await claimStarterCredits(this.connection());
         const transport = this.transport();
@@ -294,7 +303,7 @@ export class ContinuityController {
         ]);
         next = { signedIn, health, balance, planName: project.planName, problem: null, project: project.state, registeredName: project.registeredName };
       } catch (error) {
-        if (error instanceof AuthError && error.code === "signed_out") await this.forgetSession();
+        if (error instanceof AuthError && error.code === "signed_out") this.endSession();
         next = error instanceof AuthError && error.code === "signed_out" ? { ...SIGNED_OUT, problem: error.message }
           : { ...next, planName: this.account.planName, balance: this.account.balance, problem: error instanceof PipelineV3Error || error instanceof AuthError ? error.message : "Could not reach Bunsho. Check your connection." };
       }
@@ -343,19 +352,62 @@ export class ContinuityController {
     try {
       await this.tokens.signOut();
     } finally {
-      await this.forgetSession();
+      this.endSession();
     }
     await this.refreshAccount();
   }
 
-  /** What this account's check left on this machine goes when the session does, whether the writer signed out or it was revoked. */
-  private async forgetSession(): Promise<void> {
+  /**
+   * A session ending stops a running check and keeps everything else: the writer who signs back in wants their findings, World
+   * and canon where they left them (founder, 5 November 2026). "Delete my Bunsho data" is how they remove it.
+   */
+  private endSession(): void {
     this.sessionGen++;
     this.abort?.abort();
-    this.data.lastReview = null;
-    this.data.stopped = null;
-    this.data.fixed = [];
-    try { await this.save(); } finally { await this.setWorld(null); }
+  }
+
+  /**
+   * A different account signing in on this vault sees nothing of the last one's, and sends nothing of it: reads and pins are that
+   * account's to send. Its data is kept for when it returns. Runs before anything the panel shows or the engine is told.
+   */
+  private async settleOwner(): Promise<void> {
+    const uid = this.devUid ?? uidOfToken(await this.tokens.idToken());
+    if (!uid) return;
+    const { next, changed, swapped } = settleAccount(this.data, accountKey(uid));
+    if (!changed) return;
+    this.data = next;
+    if (swapped) {
+      this.starterClaimed = false;
+      this.projected = null;
+      this.world = await readWorld(this.app, this.accountFiles());
+    }
+    await this.save();
+    if (swapped) await this.refreshScan();
+  }
+
+  /** Other accounts have left data on this vault: the delete's confirm says it goes too. */
+  holdsOtherAccounts(): boolean { return Object.keys(this.data.otherAccounts).length > 0 || this.data.rootAccount !== this.data.accountKey; }
+
+  /**
+   * "Delete my Bunsho data": findings and decisions, the World, canon, the reading plan and what was picked to read, for every
+   * account that left data here. A running check stops first. The notes, the sign-in and the install are not touched.
+   */
+  async deleteData(): Promise<void> {
+    this.sessionGen++;
+    this.abort?.abort();
+    this.world = null;
+    this.projected = null;
+    const dir = this.host.dir;
+    Object.assign(this.data, NO_ACCOUNT_STATE, { noteIds: {}, accountKey: null, rootAccount: null, otherAccounts: {} });
+    this.scan = { status: "no_source" };
+    this.phase = { kind: "idle" };
+    this.host.changed();
+    await this.worldWrites.catch(() => undefined);
+    await removeWorld(this.app, dir);
+    const accounts = `${dir}/accounts`;
+    if (await this.app.vault.adapter.exists(accounts)) await this.app.vault.adapter.rmdir(accounts, true);
+    await this.save();
+    await this.refresh();
   }
 
   /**
@@ -829,9 +881,10 @@ export class ContinuityController {
   /** The in-memory copy stands even if the file cannot be written, so a paid check's World still shows until the next start. */
   private setWorld(world: WorldData | null): Promise<void> {
     this.world = world;
+    const dir = this.accountFiles();
     const write = this.worldWrites.then(async () => {
-      if (world) await writeWorld(this.app, this.host.dir, world);
-      else await removeWorld(this.app, this.host.dir);
+      if (world) await writeWorld(this.app, dir, world);
+      else await removeWorld(this.app, dir);
     }).catch((error: unknown) => { console.warn("[Bunsho] could not save the World data", error); });
     this.worldWrites = write;
     return write;

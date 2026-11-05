@@ -152,6 +152,15 @@ export async function refreshFirebaseIdToken(post: FormPost, config: AuthConfigS
   return firebaseTokens(json);
 }
 
+/** The account a Firebase ID token is for, read from its payload. Null when the token does not say. Identifies local data only: the engine verifies the token. */
+export function uidOfToken(token: string): string | null {
+  try {
+    const payload: unknown = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8"));
+    const sub = record(payload) ? payload.sub ?? payload.user_id : null;
+    return typeof sub === "string" && sub ? sub : null;
+  } catch { return null; }
+}
+
 /** Hands out a valid Firebase ID token, refreshing it from the stored refresh token (single flight). */
 export class TokenSource {
   private cached: { idToken: string; expiresAt: number } | null = null;
@@ -193,7 +202,7 @@ export class TokenSource {
     if (missingSignInValues(this.config).length > 0) {
       throw new AuthError("not_configured", "Sign-in is not set up in this build of the plugin yet.");
     }
-    // One account per sign-in: what the plugin holds for this one (findings, starter claim) goes with signing out.
+    // One account per sign-in.
     if (await this.signedIn()) throw new AuthError("failed", "You're already signed in. Sign out first to use another account.");
     this.cancelSignIn();
     const attempt = ++this.attempt;

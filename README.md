@@ -32,7 +32,7 @@ Findings always point to your own note and passage.
 
 ## Using it
 
-The plugin does nothing until you sign in: the panel and settings show only the sign-in until then.
+The plugin does nothing until you sign in: the panel shows only the sign-in until then.
 
 1. Install and enable the plugin, then open **Bunsho** from the ribbon or the command palette.
 2. Sign in with Google.
@@ -69,6 +69,7 @@ Checking only ever runs when you press the button. Writing is never metered.
 - **Network use.** When you confirm a check, the plugin sends the text of the notes and sections on your reading plan to the Bunsho service (`engine.bunsho.io`) over an encrypted connection to be checked, and receives the findings. A check of the whole book sends all of that text. A check of one chapter, of changed chapters or Check if fixed sends those chapters in full, the paragraphs of other chapters that mention the same people, and what earlier checks read from your book (facts, quotes and names). While you are signed in it also reads your plan, your credit balance and the current price from the Bunsho service (when Obsidian starts, when the panel opens, after a check, and when you come back to Obsidian, at most once a minute), and it contacts Google and Firebase to sign you in and keep you signed in. Sign-in opens a page served from your own computer in your browser; that page loads Firebase's sign-in code from Google. Requests carry a random install id generated on this machine and the plugin version; the install id protects the free starter allowance from abuse. Your notes are not sent at any other time.
 - **Telemetry.** The plugin sends no analytics or telemetry. The Bunsho service keeps the account and billing records needed to charge credits; see the privacy policy at https://bunsho.io/privacy.
 - **Stored on your machine.** Findings and dismissals live in the plugin's `data.json`, and what checks read (facts, quotes and the cast, used by the World tab and sent back on chapter checks) in `world.json` beside it, in your vault's plugin folder. Your sign-in is kept in Obsidian's secret storage, never in `data.json`.
+- **Signing out keeps your data.** Signing out stops a running check and ends your session. Your findings, decisions, World and canon stay on your machine, so they are there when you sign back in. To remove them, use **Delete my Bunsho data** in the plugin's settings, which also works signed out and says exactly what it removes first. If a different Bunsho account signs in on this vault, it sees none of that data and sends none of it; the data is kept, and returns when the first account signs back in. **Delete my Bunsho data** removes every account's data on this vault.
 - **Open source.** The plugin is a thin client under the MIT license. Detection runs in the Bunsho service.
 
 ## Development
@@ -93,7 +94,7 @@ Atomic layers. A file may import from layers below it in this list, never above:
 ```
 src/
   main.ts            plugin entry: icon, view, commands, settings; hands everything to the controller
-  pages/             what Obsidian mounts: ContinuityView (panel), SettingsTab, ConfirmCheckModal, JumpPickerModal
+  pages/             what Obsidian mounts: ContinuityView (panel), SettingsTab, ConfirmCheckModal, ConfirmDeleteDataModal, JumpPickerModal
   organisms/         SignInPanel, ManuscriptHelp, FindingCard, FindingsList, ResolverPanel, JumpPicker
   molecules/         BrandHeader, PanelFoot, TimelineRow, StatusRow, GroupHeader, Passage, AlertCard, EmptyState, SpectrumChips, SpectrumPill, CheckChapterControl, ChangedChaptersRow
   atoms/             TextAction, FillButton, QuietButton, Fact, SeverityLabel, BunshoWordmark, GoogleSignInButton
@@ -101,7 +102,7 @@ src/
   types/             shared state and persisted-data types
   lib/obsidian/      Obsidian API glue: vault reading, secret storage, selecting a passage
   lib/services/      engine access: auth (Google sign-in), engine (HTTP), review (WebSocket), project (free plan)
-  helpers/           Bunsho domain logic, pure: chapters, quote location, progress, one-project state, the review merge, passages, the account line, support
+  helpers/           Bunsho domain logic, pure: chapters, quote location, progress, one-project state, the review merge, passages, the account line, whose data this is, support
   lib/contract/      the engine wire contract, copied from the desktop app (change with the engine)
   assets/            the wordmark images (inlined into main.js), the ribbon icon and Google's G (SVG)
   utils/             generic pure functions: markdown projection, hashing, formatting, URLs

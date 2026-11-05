@@ -1,6 +1,6 @@
 /**
  * What checks have read, kept in a file in the plugin's folder in the vault: the World tab and chapter checks use it, and it
- * stays with the writer's book. Only the file's shape is trusted, so an old or hand-edited file reads as nothing rather than breaking the panel.
+ * stays with the writer's book, through sign-out too. Only the file's shape is trusted, so an old or hand-edited file reads as nothing rather than breaking the panel.
  */
 import type { App } from "obsidian";
 import { parseCastMembers, validChapterRead } from "@/lib/contract/pipelineV3Frames";
@@ -41,6 +41,7 @@ export async function readWorld(app: App, dir: string): Promise<WorldData | null
 }
 
 export async function writeWorld(app: App, dir: string, data: WorldData): Promise<void> {
+  if (!(await app.vault.adapter.exists(dir))) await app.vault.adapter.mkdir(dir);
   await app.vault.adapter.write(pathIn(dir), JSON.stringify({ version: VERSION, ...data }));
 }
 

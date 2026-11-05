@@ -4,6 +4,7 @@ import { startMockEngine } from "../scripts/mock-engine.mjs";
 import { ContinuityController, type CheckAnswer, type ControllerHost, type PlanAnswer, type PlanRequest } from "@/controllers/ContinuityController";
 import type { SourceChoice } from "@/helpers/sources";
 import { filterWorld, worldChanges } from "@/helpers/world";
+import { AuthError } from "@/lib/services/auth/authService";
 import type { PluginData } from "@/types";
 
 let engine: Awaited<ReturnType<typeof startMockEngine>> | undefined;
@@ -32,10 +33,12 @@ async function setup({ notes, host = {}, read, world = [], data: savedData = {},
       getFileByPath: (path: string) => (notes[path] === undefined ? null : { path }),
       getFolderByPath: (path: string) => (Object.keys(notes).some((n) => n.startsWith(`${path}/`)) ? { path } : null),
       adapter: {
-        exists: (path: string) => Promise.resolve(stored.has(path)),
+        exists: (path: string) => Promise.resolve(stored.has(path) || [...stored.keys()].some((key) => key.startsWith(`${path}/`))),
         read: (path: string) => Promise.resolve(stored.get(path) ?? ""),
         write: (path: string, text: string) => { if (failWrite) return Promise.reject(new Error("disk")); stored.set(path, text); return Promise.resolve(); },
         remove: (path: string) => { stored.delete(path); return Promise.resolve(); },
+        mkdir: () => Promise.resolve(),
+        rmdir: (path: string) => { for (const key of [...stored.keys()]) if (key.startsWith(`${path}/`)) stored.delete(key); return Promise.resolve(); },
       },
       read: (file: { path: string }) => (read ? read(file.path, notes[file.path]) : Promise.resolve(notes[file.path])),
     },
@@ -269,14 +272,17 @@ describe("the World tab", () => {
     expect(controller.phase.kind).toBe("idle");
   });
 
-  it("still removes the file when signing out fails partway", async () => {
-    const { controller, stored } = await setup({ notes: { ...BOOK } });
+  it("still stops a running check when signing out fails partway", async () => {
+    const { controller, data } = await setup({ notes: { ...BOOK } });
     await withConfirmedPlan(controller);
-    await controller.check();
     const tokens = (controller as unknown as { tokens: { signOut(): Promise<void> } }).tokens;
     tokens.signOut = () => Promise.reject(new Error("keychain"));
+    const run = controller.check();
+    while (controller.phase.kind !== "checking") await new Promise((done) => setTimeout(done, 5));
     await expect(controller.signOut()).rejects.toThrow("keychain");
-    expect(stored.has("plugins/bunsho/world.json")).toBe(false);
+    await run;
+    expect((data() as PluginData).lastReview).toBeNull();
+    expect(controller.phase.kind).toBe("idle");
   });
 
   it("shows a page only at the revision its last check read", async () => {
@@ -346,13 +352,105 @@ describe("the World tab", () => {
     expect(damaged.controller.worldEntities()).toBeNull();
   });
 
-  it("is removed on sign-out, along with the findings", async () => {
+  it("stays through sign-out, with the findings and decisions, and is there on signing back in", async () => {
+    const { controller, stored, data } = await setup({ notes: { ...BOOK } });
+    await withConfirmedPlan(controller);
+    await controller.check();
+    const issue = controller.currentReview()!.issues[0].issue_id;
+    await controller.dismiss(issue, true);
+    const dev = controller.data.devUid;
+    controller.data.devUid = "";
+    await controller.signOut();
+    expect(controller.account.signedIn).toBe(false);
+    expect(stored.has("plugins/bunsho/world.json")).toBe(true);
+    expect((data() as PluginData).lastReview?.issues).toHaveLength(1);
+    expect((data() as PluginData).dismissed).toEqual([issue]);
+    controller.data.devUid = dev;
+    await controller.refresh();
+    expect(controller.account.signedIn).toBe(true);
+    expect(controller.currentReview()?.issues).toHaveLength(1);
+    expect(controller.worldEntities()?.[0].name).toBe("Mira");
+  });
+
+  it("an expired session keeps the data too", async () => {
     const { controller, stored } = await setup({ notes: { ...BOOK } });
     await withConfirmedPlan(controller);
     await controller.check();
-    await controller.signOut();
-    expect(stored.has("plugins/bunsho/world.json")).toBe(false);
+    const tokens = (controller as unknown as { tokens: { idToken(): Promise<string>; signedIn(): Promise<boolean> } }).tokens;
+    controller.data.devUid = "";
+    tokens.signedIn = () => Promise.resolve(true);
+    tokens.idToken = () => Promise.reject(new AuthError("signed_out", "Your Bunsho sign-in has expired. Sign in again."));
+    await controller.refreshAccount();
+    expect(controller.account.signedIn).toBe(false);
+    expect(stored.has("plugins/bunsho/world.json")).toBe(true);
+    expect(controller.currentReview()?.issues).toHaveLength(1);
+  });
+
+  it("a different account sees nothing of the first, sends nothing of it, and neither loses anything", async () => {
+    const { controller, stored, data } = await setup({ notes: { ...BOOK } });
+    await withConfirmedPlan(controller);
+    await controller.check();
+    const issue = controller.currentReview()!.issues[0].issue_id;
+    await controller.dismiss(issue, true);
+    const worldBefore = stored.get("plugins/bunsho/world.json");
+
+    controller.data.devUid = "second-account";
+    await controller.refresh();
+    expect(controller.data.source).toBeNull();
+    expect(controller.currentReview()).toBeNull();
     expect(controller.worldEntities()).toBeNull();
+    expect(controller.data.dismissed).toEqual([]);
+    expect(stored.get("plugins/bunsho/world.json")).toBe(worldBefore);
+
+    // Its own check, of its own, under its own folder, with no reads of the first's.
+    controller.data.source = FOLDER;
+    await controller.refresh();
+    await withConfirmedPlan(controller);
+    await controller.check();
+    expect(engine!.starts.at(-1)?.cachedReads).toEqual([]);
+    expect(stored.get("plugins/bunsho/world.json")).toBe(worldBefore);
+    expect([...stored.keys()].filter((key) => key.includes("/accounts/"))).toHaveLength(1);
+
+    controller.data.devUid = "test";
+    await controller.refresh();
+    expect(controller.data.source).toEqual(FOLDER);
+    expect((data() as PluginData).dismissed).toEqual([issue]);
+    expect(controller.currentReview()?.issues).toHaveLength(1);
+    expect(controller.worldEntities()?.[0].name).toBe("Mira");
+  });
+
+  it("Delete my Bunsho data removes what it says it does, for every account, and leaves the notes and the install", async () => {
+    const { controller, stored, notes, data } = await setup({ notes: { ...BOOK } });
+    await withConfirmedPlan(controller);
+    await controller.check();
+    await controller.dismiss(controller.currentReview()!.issues[0].issue_id, true);
+    const { installId, workspaceId } = controller.data;
+    controller.data.devUid = "second-account";
+    await controller.refresh();
+    controller.data.source = FOLDER;
+    await controller.refresh();
+    await withConfirmedPlan(controller);
+    await controller.check();
+    expect(controller.holdsOtherAccounts()).toBe(true);
+
+    await controller.deleteData();
+    expect([...stored.keys()]).toEqual([]);
+    const saved = data() as PluginData;
+    expect(saved).toMatchObject({ source: null, plan: null, dismissed: [], deliberate: [], fixed: [], lastReview: null, stopped: null, otherAccounts: {}, noteIds: {}, installId, workspaceId });
+    expect(controller.holdsOtherAccounts()).toBe(false);
+    expect(Object.keys(notes)).toEqual(Object.keys(BOOK));
+    expect(controller.account.signedIn).toBe(true);
+  });
+
+  it("Delete my Bunsho data stops a running check, which then saves nothing", async () => {
+    const { controller, stored, data } = await setup({ notes: { ...BOOK } });
+    await withConfirmedPlan(controller);
+    const run = controller.check();
+    while (controller.phase.kind !== "checking") await new Promise((done) => setTimeout(done, 5));
+    await controller.deleteData();
+    await run;
+    expect((data() as PluginData).lastReview).toBeNull();
+    expect(stored.has("plugins/bunsho/world.json")).toBe(false);
   });
 
   it("a file that cannot be written does not lose the paid check", async () => {

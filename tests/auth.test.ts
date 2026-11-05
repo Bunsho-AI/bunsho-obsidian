@@ -1,6 +1,6 @@
 import * as net from "node:net";
 import { describe, expect, it, vi } from "vitest";
-import { TokenSource, refreshFirebaseIdToken, waitForBrowserSignIn, type FormPost, type SessionStore } from "@/lib/services/auth/authService";
+import { uidOfToken, TokenSource, refreshFirebaseIdToken, waitForBrowserSignIn, type FormPost, type SessionStore } from "@/lib/services/auth/authService";
 import { signInPageHtml } from "@/lib/services/auth/signInPage";
 
 const config = { firebaseApiKey: "key", firebaseAuthDomain: "x.firebaseapp.com", firebaseAppId: "app" };
@@ -20,6 +20,19 @@ const ipv6Available = () => new Promise<boolean>((resolve) => {
   const probe = net.createServer();
   probe.once("error", () => resolve(false));
   probe.listen(0, "::1", () => probe.close(() => resolve(true)));
+});
+
+describe("uidOfToken", () => {
+  const token = (payload: unknown) => `x.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.y`;
+  it("reads the account from the token's payload", () => {
+    expect(uidOfToken(token({ sub: "u1" }))).toBe("u1");
+    expect(uidOfToken(token({ user_id: "u2" }))).toBe("u2");
+  });
+  it("says nothing about a token it cannot read", () => {
+    expect(uidOfToken("nonsense")).toBeNull();
+    expect(uidOfToken(token({ sub: 4 }))).toBeNull();
+    expect(uidOfToken(token(null))).toBeNull();
+  });
 });
 
 describe("browser sign-in server", () => {
