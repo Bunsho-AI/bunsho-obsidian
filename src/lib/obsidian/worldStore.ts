@@ -1,30 +1,40 @@
 /**
- * What the last check read, kept in a file in the plugin's folder in the vault: the World tab's data stays with the writer's
- * book. Only the file's shape is trusted, so an old or hand-edited file reads as nothing rather than breaking the panel.
+ * What checks have read, kept in a file in the plugin's folder in the vault: the World tab and chapter checks use it, and it
+ * stays with the writer's book. Only the file's shape is trusted, so an old or hand-edited file reads as nothing rather than breaking the panel.
  */
 import type { App } from "obsidian";
 import { parseCastMembers, validChapterRead } from "@/lib/contract/pipelineV3Frames";
-import type { CastMember, ChapterRead } from "@/lib/contract/pipelineV3.types";
+import type { KeptRead } from "@/helpers/reads";
+import type { CastMember } from "@/lib/contract/pipelineV3.types";
 
 export interface WorldData {
-  /** The review these reads belong to (its `checkedAt`). The text alone cannot say: a re-check of unchanged text has the same snapshot. */
-  checkedAt: number;
-  reads: ChapterRead[];
+  /** The book as checks have read it. A read belongs to the page revision it was made from, which is what ties it to a review. */
+  reads: KeptRead[];
   cast: CastMember[];
+  /** A full review built the cast: a chapter check can then compare against the book. */
+  fromFullReview: boolean;
 }
 
-const VERSION = 1;
+const VERSION = 2;
 const FILE = "world.json";
 const pathIn = (dir: string): string => `${dir}/${FILE}`;
+
+const keptRead = (value: unknown): value is KeptRead => {
+  const entry = value as Partial<KeptRead> | null;
+  return Boolean(entry) && (entry?.readPolicyId === null || typeof entry?.readPolicyId === "string") && validChapterRead(entry?.read);
+};
 
 export async function readWorld(app: App, dir: string): Promise<WorldData | null> {
   try {
     const path = pathIn(dir);
     if (!(await app.vault.adapter.exists(path))) return null;
-    const raw = JSON.parse(await app.vault.adapter.read(path)) as Partial<WorldData> & { version?: unknown };
+    const raw = JSON.parse(await app.vault.adapter.read(path)) as { version?: unknown; reads?: unknown; cast?: unknown; fromFullReview?: unknown };
     const cast = parseCastMembers(raw.cast);
-    if (raw.version !== VERSION || typeof raw.checkedAt !== "number" || !Array.isArray(raw.reads) || !cast) return null;
-    return { checkedAt: raw.checkedAt, reads: raw.reads.filter(validChapterRead), cast };
+    if (!Array.isArray(raw.reads) || !cast) return null;
+    // A file from before chapter checks says nothing of its read policy: its reads stay for the World and are never sent.
+    if (raw.version === 1) return { reads: raw.reads.filter(validChapterRead).map((read) => ({ readPolicyId: null, read })), cast, fromFullReview: false };
+    if (raw.version !== VERSION) return null;
+    return { reads: raw.reads.filter(keptRead), cast, fromFullReview: raw.fromFullReview === true };
   } catch {
     return null;
   }

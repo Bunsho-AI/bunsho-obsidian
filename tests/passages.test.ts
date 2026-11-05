@@ -21,6 +21,12 @@ describe("selectPassages", () => {
     expect(result.chars).toBe(kept.reduce((n, p) => n + p.text.length, 0));
   });
 
+  it("follows every alias of an individual the checked chapter names by any one of them", () => {
+    const groups = castNameGroups([member("Philip Pirrip", { properNames: ["Philip Pirrip"], aliases: ["Pip"] })], []);
+    const result = selectPassages({ checked: [page("c", 1, "Pip ran.")], others: [page("o", 0, "Philip Pirrip was born.\nNobody else.")], nameGroups: groups });
+    expect(result.passages[0].paragraphs.map((p) => p.text)).toEqual(["Philip Pirrip was born."]);
+  });
+
   it("uses proper names and introduced aliases of cached reads, never descriptions", () => {
     const read = { cast: [{ pageId: "c", order: 1, name: "Joe Gargery", kind: "person", role: "smith",
       names: [{ name: "Joe", proper: true }, { name: "the blacksmith", proper: false }], introducedAliases: [{ alias: "Old Joe", quote: "" }] }] } as unknown as ChapterRead;

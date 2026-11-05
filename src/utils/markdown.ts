@@ -23,6 +23,8 @@ export interface Projection {
   toSource(offset: number): number;
   /** Offset in `text` -> offset in the note just after the last character of a range ending there. */
   toSourceEnd(offset: number): number;
+  /** Offset in the note -> offset in `text`: a cursor inside removed markup counts as the text that follows it. */
+  fromSource(offset: number): number;
 }
 
 const FRONTMATTER = /^---[ \t]*\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/;
@@ -110,6 +112,13 @@ export function projectMarkdown(raw: string): Projection {
         if (offset > s.out) return s.src + Math.min(offset - s.out, s.len);
       }
       return segments[0]?.src ?? 0;
+    },
+    fromSource(offset) {
+      for (const s of segments) {
+        if (offset < s.src) return s.out;
+        if (offset < s.src + s.len) return s.out + (offset - s.src);
+      }
+      return out.length;
     },
   };
 }

@@ -1,32 +1,18 @@
-/** One whole-manuscript review: build the request from reading units, run it, and keep only findings grounded in the text sent. */
+/** One review: build the request from reading units, run it, and keep only findings grounded in the text sent. */
 import { randomUUID } from "node:crypto";
-import { buildUnits, snapshotId, type PageMeta, type PlannedItem, type SourceChoice } from "@/helpers/sources";
-import { PipelineV3Client, type PipelineV3ReviewCallbacks } from "@/lib/contract/pipelineV3Client";
-import type { EngineIssue } from "@/lib/contract/engine.types";
+import { cachedReadBudget, castFocus, castNameGroups, fitCachedReads, selectPassages } from "@/helpers/passages";
+import { usableReads, type KeptRead } from "@/helpers/reads";
+import type { CurrentChapter, MergeRun, ReviewCoverage, ReviewOutcome } from "@/helpers/reviewMerge";
+import { buildUnits, snapshotId, type PlannedItem, type SourceChoice } from "@/helpers/sources";
+import { PipelineV3Client, PipelineV3Error, type PipelineV3ReviewCallbacks } from "@/lib/contract/pipelineV3Client";
 import { groundIssues, type GroundingPage } from "@/lib/contract/grounding";
-import type { CastMember, PipelineV3Health, PipelineV3Result } from "@/lib/contract/pipelineV3.types";
+import { PIPELINE_V3_PRICE_OP, type CastMember, type ChapterRead, type PipelineV3Health, type PipelineV3Result } from "@/lib/contract/pipelineV3.types";
+import { pipelineV3ReviewCredits } from "@/lib/contract/pipelineV3Pricing";
 
-/** What this review read, in the writer's terms: never reading units. */
-export interface ReviewCoverage {
-  /** Plan items sent, in order. */
-  sources: { id: string; label: string }[];
-  /** Plan items the engine could not fully read. */
-  unreadSources: string[];
-  /** Plan items the writer left out. */
-  excluded: number;
-}
+export type { ReviewCoverage, ReviewOutcome };
 
-export interface ReviewOutcome {
-  checkedAt: number;
-  snapshotId: string;
-  /** What was picked when this ran: the panel shows a review only for its own source. */
-  source: SourceChoice;
-  pages: PageMeta[];
-  issues: EngineIssue[];
-  coverage: ReviewCoverage;
-  refundedCredits: number;
-  droppedFindings: number;
-}
+/** What the plugin kept from earlier checks. A chapter check sees the rest of the book through it. */
+export interface KnownBook { reads: readonly KeptRead[]; cast: readonly CastMember[]; fromFullReview: boolean }
 
 export interface RunReviewInput {
   items: readonly PlannedItem[];
@@ -40,27 +26,79 @@ export interface RunReviewInput {
   /** The book's cast, for the World tab. */
   onCast?: (cast: CastMember[]) => void;
   signal?: AbortSignal;
+  /** Plan items to check. Absent: a full review. Every other item goes as passages, whichever way it is cut. */
+  scope?: ReadonlySet<string> | null;
+  known?: KnownBook;
 }
 
-export async function runReview(input: RunReviewInput): Promise<ReviewOutcome> {
-  const { items, health } = input;
+/** One finished review, before anything is stored. */
+export interface ReviewRun extends MergeRun {
+  checkedAt: number;
+  coverage: ReviewCoverage;
+  cast: CastMember[];
+  readPolicyId: string;
+  /** Pages sent whole. */
+  checked: string[];
+  /** Every page with text, as sent. */
+  texts: Map<string, CurrentChapter>;
+  /** A chapter check that could not compare against the book, so it may not be recorded as checked. */
+  alone: boolean;
+  cachedReads: number;
+}
+
+/**
+ * Refuses, before anything is spent, a review that costs more than the price the writer confirmed: the text or the engine's
+ * pricing changed after the quote. The engine refuses it too.
+ */
+export function assertWithinConfirmedPrice(credits: number | null, maxCredits: number | undefined): void {
+  if (maxCredits === undefined || credits === null || credits <= maxCredits) return;
+  throw new PipelineV3Error("price_changed", { credits, charged: false },
+    `This review now costs about ${credits.toLocaleString("en-US")} credits, more than the ${maxCredits.toLocaleString("en-US")} you confirmed. Check the new price and try again.`);
+}
+
+export async function runReview(input: RunReviewInput): Promise<ReviewRun> {
+  const { items, health, known } = input;
   const { units, pages } = buildUnits(items);
+  const scope = input.scope ?? null;
+  const checkedUnits = scope ? units.filter((unit) => scope.has(unit.sourceId)) : units;
+  const whole = new Set(checkedUnits.map((unit) => unit.pageId));
+  const others = units.filter((unit) => !whole.has(unit.pageId));
   const snapshot = snapshotId(units);
-  const start = {
+
+  // The engine charges the text sent whole, once per review.
+  const checkedChars = checkedUnits.reduce((n, unit) => n + unit.text.length, 0);
+  assertWithinConfirmedPrice(pipelineV3ReviewCredits({ op: PIPELINE_V3_PRICE_OP, creditsPerThousandChars: health.pricing.creditsPerThousandChars, minimumUnits: health.pricing.minimumUnits }, checkedChars), input.maxCredits);
+
+  const asPage = (unit: (typeof units)[number]) => ({ pageId: unit.pageId, pageOrder: unit.order, text: unit.text });
+  const checked = checkedUnits.map(asPage);
+  const usable: ChapterRead[] = known ? usableReads(known.reads, health.readPolicyId, units.map((unit) => ({ pageId: unit.pageId, rev: unit.rev, order: unit.order }))) : [];
+  // A chapter check weighs the rest of the book by person, through the cast, not by name spelling.
+  const cast = scope ? known?.cast ?? [] : [];
+  const focus = scope ? castFocus({ cast, checked, reads: usable }) : null;
+  const startBase = {
     reviewId: randomUUID(),
     workspaceId: input.workspaceId,
     snapshotId: snapshot,
-    scope: "full" as const,
+    scope: scope ? "chapters" as const : "full" as const,
     policyId: health.policyId,
     readPolicyId: health.readPolicyId,
-    pages: units.map((u) => ({ pageId: u.pageId, order: u.order, rev: u.rev, send: "whole" as const, ...(u.part ? { part: u.part } : {}) })),
-    cachedReads: [],
+    // Every chapter is listed, even one with no selected passages: the engine keeps a cached read as context only for a chapter
+    // listed at that read's revision.
+    pages: units.map((u) => ({ pageId: u.pageId, order: u.order, rev: u.rev, send: whole.has(u.pageId) ? "whole" as const : "passages" as const, ...(u.part ? { part: u.part } : {}) })),
     pins: [],
-    focusNames: [],
+    focusNames: focus?.focusNames ?? [],
     ...(input.maxCredits === undefined ? {} : { maxCredits: input.maxCredits }),
   };
+  const cachedReads = fitCachedReads(usable, checked.map((page) => page.pageOrder), whole, cachedReadBudget({ ...startBase, cachedReads: [] }));
+  const selection = scope ? selectPassages({ checked, others: others.map(asPage), factParagraphs: focus?.factParagraphs,
+    nameGroups: castNameGroups(cast, cachedReads.filter((read) => whole.has(read.pageId))) }) : null;
+  // A chapter check claims the chapter was checked against the book only when the book is known: a full review built the cast
+  // the passages were chosen by, or every other chapter's read goes along as context.
+  const sentReads = new Set(cachedReads.map((read) => read.pageId));
+  const alone = Boolean(scope) && others.length > 0 && !known?.fromFullReview && !others.every((unit) => sentReads.has(unit.pageId));
+
   const result: PipelineV3Result = await input.client.review(
-    { start, pages: units.map((u) => ({ pageId: u.pageId, text: u.text })), passages: [] },
+    { start: { ...startBase, cachedReads }, pages: checkedUnits.map((u) => ({ pageId: u.pageId, text: u.text })), passages: selection?.passages ?? [] },
     input.callbacks, input.signal);
 
   input.onCast?.(result.cast);
@@ -81,5 +119,13 @@ export async function runReview(input: RunReviewInput): Promise<ReviewOutcome> {
     },
     refundedCredits: result.refundedCredits ?? 0,
     droppedFindings: grounded.droppedIssues,
+    unreadPages: result.unreadPages ?? [],
+    capped: (result.stats?.shortlistDropped ?? 0) > 0 || (result.stats?.canonPinsDropped ?? 0) > 0,
+    cast: result.cast,
+    readPolicyId: result.readPolicyId,
+    checked: [...whole],
+    texts: new Map(units.map((u) => [u.pageId, { rev: u.rev, text: u.text }])),
+    alone,
+    cachedReads: cachedReads.length,
   };
 }

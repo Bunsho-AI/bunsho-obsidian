@@ -179,6 +179,13 @@ export function buildUnits(items: readonly PlannedItem[], hash: (text: string) =
   return { units, pages };
 }
 
+/** The item a position in a note belongs to: the one holding the offset, else the note's nearest before it, else its first. */
+export function itemAtOffset(items: readonly PlannedItem[], noteId: string, offset: number | null): PlannedItem | null {
+  const own = items.filter((item) => item.included && item.noteId === noteId).sort((a, b) => a.from - b.from);
+  if (offset === null) return own[0] ?? null;
+  return [...own].reverse().find((item) => item.from <= offset) ?? own[0] ?? null;
+}
+
 export interface PlanQuote { chars: number; words: number; units: number; sources: number; hasParts: boolean; problems: string[] }
 
 /** Exactly what the plan would send, and anything the engine would refuse. Hashes nothing, so the plan screen can call it on every tick. */

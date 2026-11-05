@@ -153,6 +153,7 @@ describe("renames", () => {
     await withConfirmedPlan(controller);
     const run = controller.check();
     while (controller.phase.kind !== "checking") await new Promise((done) => setTimeout(done, 5));
+    for (const name of ["a", "b"]) { notes[`Novel/${name}.md`] = notes[`Book/${name}.md`]; delete notes[`Book/${name}.md`]; }
     await controller.moved("Novel", "Book");
     await run;
     expect(controller.data.source?.path).toBe("Novel");
@@ -277,15 +278,15 @@ describe("the World tab", () => {
     expect(stored.has("plugins/bunsho/world.json")).toBe(false);
   });
 
-  it("does not show an older World under a newer check of the same text", async () => {
+  it("shows a page only at the revision its last check read", async () => {
     const first = await setup({ notes: { ...BOOK } });
     await withConfirmedPlan(first.controller);
     await first.controller.check();
     const saved = first.data() as PluginData;
     const stored = [...first.stored];
     await engine!.close();
-    const newer = { ...saved, lastReview: { ...saved.lastReview!, checkedAt: saved.lastReview!.checkedAt + 1000 } };
-    const second = await setup({ notes: { ...BOOK }, world: stored, data: newer as unknown as Record<string, unknown> });
+    const ledger = Object.fromEntries(Object.entries(saved.lastReview!.ledger).map(([id, entry]) => [id, { ...entry, rev: "another-revision" }]));
+    const second = await setup({ notes: { ...BOOK }, world: stored, data: { ...saved, lastReview: { ...saved.lastReview!, ledger } } as unknown as Record<string, unknown> });
     expect(second.controller.worldEntities()).toBeNull();
   });
 
