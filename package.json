@@ -10,6 +10,7 @@
     "build:stage": "tsc --noEmit && node esbuild.config.mjs stage",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "lint": "eslint .",
     "check:release": "node scripts/check-release-config.mjs"
   },
@@ -21,6 +22,7 @@
     "@eslint/json": "^0.14.0",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.5.12",
+    "@vitest/coverage-v8": "^2.1.9",
     "esbuild": "^0.24.0",
     "eslint": "^9.39.5",
     "eslint-plugin-obsidianmd": "^0.4.2",
