@@ -268,10 +268,11 @@ export class DirectorTab {
   private async runCheck(scene: DirectorSceneRecord, itemId: string, quoted: number): Promise<void> {
     this.checking = scene.sceneId;
     this.host.redraw();
+    const before = this.continuity.currentReview()?.checkedAt;
     await this.continuity.checkChapter(itemId, quoted);
     this.checking = null;
-    // A check that did not run keeps its offer; the panel's alert says why.
-    if (this.continuity.phase.kind !== "error") await this.director.dismissCheckOffer(scene.sceneId);
+    // A check that did not run keeps its offer, and the panel says why when there is a why.
+    if (this.continuity.phase.kind !== "error" && this.continuity.currentReview()?.checkedAt !== before) await this.director.dismissCheckOffer(scene.sceneId);
     this.host.redraw("direction:field");
   }
 

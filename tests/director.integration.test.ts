@@ -73,10 +73,10 @@ async function setup(options: { notes?: Record<string, string>; engine?: Paramet
   await director.whenLoaded();
   const open = (path: string, cursor: number) => {
     const editor = fakeEditor(notes, path, cursor);
-    const view = Object.assign(new (MarkdownView as unknown as new () => MarkdownView)(), { file: { path }, editor });
+    const view = Object.assign(new (MarkdownView as unknown as new () => MarkdownView)(), { file: { path }, editor, mode: "source", getMode() { return (this as unknown as { mode: string }).mode; } });
     views.push({ view });
     active = path;
-    return editor;
+    return Object.assign(editor, { reading: () => { (view as unknown as { mode: string }).mode = "preview"; } });
   };
   const itemOf = (path: string) => { const { scan } = continuity; if (scan.status !== "ready") throw new Error("no scan"); return scan.items.find((i) => i.path === path)!.id; };
   return { continuity, director, notes, stored, open, itemOf, processed, activate: (path: string) => { active = path; }, engine };
@@ -266,8 +266,18 @@ describe("Keep", () => {
     const scene = await drafted(made);
     const kept = await keep(made, scene.sceneId);
     expect(made.processed).toEqual(["Book/a.md"]);
-    expect(kept).toMatchObject({ ok: true, note: "Chapter wasn't open, so this went straight into the file, and Undo cannot take it back." });
+    expect(kept).toMatchObject({ ok: true, note: "Chapter wasn't open for editing, so this went straight into the file, and Undo cannot take it back." });
     expect(made.notes["Book/a.md"]).toContain("Beat 3 as prose");
+  });
+  it("into a note in reading view goes through the file, whose editor nothing saves, and says there is no undo", async () => {
+    const made = await setup();
+    const editor = made.open("Book/a.md", 0);
+    const scene = await drafted(made);
+    editor.reading();
+    const kept = await keep(made, scene.sceneId);
+    expect(editor.transactions).toBe(0);
+    expect(made.processed).toEqual(["Book/a.md"]);
+    expect(kept).toMatchObject({ ok: true, note: "Chapter wasn't open for editing, so this went straight into the file, and Undo cannot take it back." });
   });
   it("at the cursor goes where it was written from, though the cursor has moved on", async () => {
     const made = await setup();

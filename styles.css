@@ -542,6 +542,7 @@ button.bunsho-identity-new { color: var(--bunsho-text-2); border: 1px solid var(
 .bunsho-small { font-family: var(--bunsho-desk-ui); font-size: 11px; line-height: 1.5; color: var(--bunsho-text-3); }
 .bunsho-director-line { font-family: var(--bunsho-desk-ui); font-size: 13px; line-height: 1.55; color: var(--bunsho-text-2); overflow-wrap: anywhere; }
 .bunsho-director-strong { color: var(--bunsho-text-1); }
+.bunsho-scene-folded .bunsho-pen { flex: none; font-family: var(--bunsho-desk-ui); font-size: 11px; font-weight: 500; color: var(--bunsho-text-2); }
 .bunsho-panel button.bunsho-pen { all: unset; box-sizing: border-box; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 7px; min-height: 28px; font-family: var(--bunsho-desk-ui); font-size: 11px; font-weight: 500; color: var(--bunsho-text-2); cursor: pointer; }
 .bunsho-panel button.bunsho-pen.is-quiet { color: var(--bunsho-text-3); }
 .bunsho-panel button.bunsho-pen.is-accent { color: var(--bunsho-accent-text); }
@@ -605,7 +606,7 @@ button.bunsho-identity-new { color: var(--bunsho-text-2); border: 1px solid var(
 .bunsho-beat-side { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .bunsho-beat-n { padding-top: 3px; font-variant-numeric: tabular-nums; }
 .bunsho-beat-n.is-flagged { color: var(--bunsho-danger); font-weight: 700; }
-.bunsho-panel button.bunsho-beat-grip { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 24px; color: var(--bunsho-text-3); cursor: grab; border-radius: 3px; }
+.bunsho-panel button.bunsho-beat-grip { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 24px; color: var(--bunsho-text-3); cursor: grab; border-radius: 3px; -webkit-user-drag: element; }
 .bunsho-panel button.bunsho-beat-grip:hover { background: var(--bunsho-card-soft); color: var(--bunsho-text-1); }
 .bunsho-panel button.bunsho-beat-grip:focus-visible { outline: 2px solid var(--bunsho-accent); }
 .bunsho-beat-grip svg { width: 14px; height: 14px; }

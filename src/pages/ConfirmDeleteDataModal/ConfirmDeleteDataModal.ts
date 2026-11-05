@@ -5,6 +5,7 @@ export const DELETE_REMOVES = [
   "Your findings, and what you decided about them",
   "The World: what checks read from your book",
   "Your canon: every fact, name and character you declared",
+  "Your Director scenes, and any draft you have not kept. Scenes you kept stay in your notes.",
   "Your reading plan, and what you chose to read",
 ] as const;
 

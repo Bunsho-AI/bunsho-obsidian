@@ -317,7 +317,7 @@ export class DirectorController {
           const notes: string[] = [];
           if (current.anchor.placement === "cursor" && result.plan.at === "end") notes.push(`The chapter was reopened since this scene was written, so it went at the end of ${chapter}.`);
           if (result.plan.noteEnd && current.anchor.placement !== "cursor") notes.push(`${chapter} has changed in your plan since this scene was written, so it went at the end of that note.`);
-          if (!result.undoable) notes.push(`${chapter} wasn't open, so this went straight into the file, and Undo cannot take it back.`);
+          if (!result.undoable) notes.push(`${chapter} wasn't open for editing, so this went straight into the file, and Undo cannot take it back.`);
           note = notes.length > 0 ? notes.join(" ") : null;
         }
       }

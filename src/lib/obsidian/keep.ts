@@ -1,5 +1,5 @@
 /**
- * The only place the plugin writes into a manuscript. An open note changes through its editor, as one undo step. A closed note changes through vault.process, which is atomic but
+ * The only place the plugin writes into a manuscript. An open note changes through its editor, as one undo step. A closed note, or one in reading view, changes through vault.process, which is atomic but
  * outside any undo history, and the writer is told. Offsets are in the note's LF text; a file written elsewhere keeps its own line endings.
  */
 import { MarkdownView, type App, type Editor, type TFile } from "obsidian";
@@ -26,7 +26,8 @@ function rawOffset(raw: string, offset: number): number {
 function openEditor(app: App, path: string): Editor | null {
   for (const leaf of app.workspace.getLeavesOfType("markdown")) {
     const { view } = leaf;
-    if (view instanceof MarkdownView && view.file?.path === path) return view.editor;
+    // A note in reading view has an editor that nothing saves: it is changed like a closed note, and the view follows the file.
+    if (view instanceof MarkdownView && view.file?.path === path && view.getMode() === "source") return view.editor;
   }
   return null;
 }
