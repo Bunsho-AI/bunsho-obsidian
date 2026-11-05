@@ -562,6 +562,7 @@ export class ContinuityController {
       if (prepared.kind === "quiet") { this.idle(); return { kind: "none", message: "" }; }
       if (prepared.kind === "refused") { this.idle(); return incomplete(prepared.message); }
       const { scan, health, review, scope } = prepared;
+      const session = this.sessionGen;
       const issue = review.issues.find((i) => i.issue_id === issueId);
       const revs = new Map(scan.pages.map((page) => [page.pageId, page.rev]));
       const edited = issue?.citations.some((citation) => revs.get(citation.page_id) !== citation.source_ref?.rev) ?? false;
@@ -574,9 +575,10 @@ export class ContinuityController {
         return incomplete(done.error instanceof Error ? done.error.message : "The check failed.");
       }
       const { run, merged, scan: after } = done;
-      const proven = merged.failed.length === 0 && !merged.incomplete && !merged.stale && !run.capped
+      const proven = merged.failed.length === 0 && !merged.incomplete && !merged.stale && !run.capped && run.lostFindings === 0
         && after?.status === "ready" && after.snapshotId === run.snapshotId && !merged.survivors.has(issueId) && edited
         && await this.policyStands(health);
+      if (session !== this.sessionGen) { this.idle(); return { kind: "none", message: "" }; } // signed out during that last question
       if (proven) this.data.fixed = [...new Set([...this.data.fixed, issueId])];
       const saved = await this.persist(merged, run, scan.items, scope, quoted);
       if (!saved && proven) this.data.fixed = this.data.fixed.filter((id) => id !== issueId);
@@ -683,10 +685,12 @@ export class ContinuityController {
       const sameReadPolicy = run.readPolicyId === health.readPolicyId;
       const kept: KeptRead[] = [...(sameReadPolicy ? world?.reads ?? [] : forgetCached(world?.reads ?? [])), ...fresh.map((read) => ({ readPolicyId: sameReadPolicy ? health.readPolicyId : null, read }))];
       await this.setWorld({
-        reads: pruneReads(kept, merged.review.ledger, new Set(current.keys())),
+        // Paid for, whatever the scan after it managed to read: what was sent stays known.
+        reads: pruneReads(kept, merged.review.ledger, new Set([...current.keys(), ...sent])),
         cast: mergeCast(world?.cast ?? [], run.cast, scope ? "chapters" : "full"),
         fromFullReview: scope ? world?.fromFullReview ?? false : true,
       });
+      if (session !== this.sessionGen) return { kind: "ended" }; // signed out while the World was being kept
       return { kind: "merged", run, merged, scan: now };
     } finally {
       if (this.abort === abort) this.abort = null;
@@ -736,8 +740,8 @@ export class ContinuityController {
       try { await this.save(); } catch (saveError) { console.warn("[Bunsho] could not save", saveError); }
     };
     if (error instanceof PipelineV3Error && error.code === "cancelled") {
-      // A review stopped before the engine charged it leaves nothing to say.
-      if (error.detail.charged) await stop({ status: "partial", source, checked: 0, failed: total, total, message: error.message, credits });
+      // A review the engine says it did not charge leaves nothing to say. An unknown charge is not a free one.
+      if (error.detail.charged !== false) await stop({ status: "partial", source, checked: 0, failed: total, total, message: error.message, credits });
       this.idle();
       return;
     }
@@ -749,7 +753,8 @@ export class ContinuityController {
     }
     const charged = error instanceof PipelineV3Error ? error.detail.charged : undefined;
     // A size refusal says what to do instead; trying again would fail the same way.
-    const canRetry = !(error instanceof PipelineV3Error && error.code === "too_large");
+    // A chapter check whose reads the engine refused has no book to compare against: the whole-book check is the way back.
+    const canRetry = !(error instanceof PipelineV3Error && (error.code === "too_large" || (error.code === "invalid_request" && action.kind !== "full")));
     this.setPhase({ kind: "error", message: error instanceof Error ? error.message : "The check failed.", charged, ...(canRetry ? { action } : {}) });
     await this.refreshAccount();
   }

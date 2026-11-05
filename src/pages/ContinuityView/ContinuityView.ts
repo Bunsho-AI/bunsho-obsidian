@@ -289,6 +289,8 @@ export class ContinuityView extends ItemView {
     const c = this.controller;
     const card = AlertCard(body, { label: "Review failed", body: charged ? `${message} Trying again is charged again.` : message });
     const quote = c.retryQuote();
+    // A retry is priced on its button, unless the whole book's own dialog names the price. No price, no button.
+    if (quote === null && !(c.phase.kind === "error" && c.phase.action?.kind === "full")) return;
     const actions = card.createDiv({ cls: "bunsho-alert-actions" });
     const retry = actions.createEl("button", { cls: "bunsho-retry", text: quote === null ? "Try again" : `Try again \u00b7 ~${formatNumber(quote)} credits`, attr: { "data-focus-key": "alert:retry" } });
     retry.onclick = () => void this.runReview(() => c.retry(), () => ["alert:retry", "changed:review", "chapter:open", "tab:continuity"]);
@@ -297,7 +299,7 @@ export class ContinuityView extends ItemView {
   /** What is priced and what is free above the list: changed chapters first, as the desktop's row is, then the check and the picker. */
   private renderLoopTools(body: HTMLElement, open: readonly EngineIssue[], pages: Map<string, PageMeta>): void {
     const c = this.controller;
-    if (c.phase.kind === "checking" || c.phase.kind === "preparing" || c.phase.kind === "confirming") return;
+    if (c.phase.kind === "checking" || c.phase.kind === "preparing" || c.phase.kind === "confirming") { this.confirming = null; return; }
     const changed = c.changedChapters();
     if (changed) {
       const one = changed.count === 1;
@@ -351,7 +353,7 @@ export class ContinuityView extends ItemView {
     const open = filterBySpectrum(allOpen, this.spectrum);
     this.renderLoopTools(body, allOpen, pages);
     if (this.listFeedback) body.createDiv({ cls: "bunsho-feedback is-success", text: this.listFeedback, attr: { role: "status" } });
-    SpectrumChips(body, { chips: orderSpectrumByCount(allOpen), active: this.spectrum, onSelect: (spectrum) => { this.spectrum = spectrum; this.listFeedback = null; this.render(); } });
+    SpectrumChips(body, { chips: [...orderSpectrumByCount(allOpen), ...(this.spectrum && open.length === 0 ? [{ key: this.spectrum, count: 0 }] : [])], active: this.spectrum, onSelect: (spectrum) => { this.spectrum = spectrum; this.listFeedback = null; this.render(); } });
     const toItem = (issue: EngineIssue): FindingItem => {
       const evidence = cardEvidence(issue);
       return {

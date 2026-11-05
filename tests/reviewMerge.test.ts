@@ -223,6 +223,45 @@ describe("mergeReview", () => {
     expect(issues({ edited: new Set(["b"]) })).toEqual(["gone"]);
   });
 
+  it("a cut that moved is the same chapter: checked whole, a card citing the old cut is judged like any other", () => {
+    const cut = (pageId: string, order: number, rev: string) => page(pageId, order, rev, "book");
+    const stay = issue("stay", [["book~old", "r1", "Her eyes were green."], ["other", "o1", "Nothing."]]);
+    const gone = issue("gone", [["book~old", "r1", "Her eyes were hazel."], ["other", "o1", "Nothing."]]);
+    const known = prior([stay, gone], { "book~old": { rev: "r1", order: 0, policyId: POLICY, checkedAt: 1 } }, [cut("book~old", 0, "r1"), page("other", 1, "o1")]);
+    const merged = mergeReview(input({ prior: known, checked: ["book~new"], items: [{ id: "book", label: "Book", included: true }, { id: "other", label: "other", included: true }],
+      run: { ...input({}).run, pages: [cut("book~new", 0, "r2"), page("other", 1, "o1")] },
+      texts: new Map([["book~new", { rev: "r2", text: "Her eyes were green." }], ["other", { rev: "o1", text: "Nothing." }]]) }));
+    expect(merged.pruned).toEqual(["gone"]);
+    expect(merged.review.pages.map((p) => p.pageId)).toContain("book~old");
+  });
+
+  it("a part of a long chapter checked alone keeps a card citing another part it did not check", () => {
+    const cut = (pageId: string, order: number, rev: string) => page(pageId, order, rev, "book");
+    const card = issue("card", [["book~old", "r1", "Her eyes were green."], ["other", "o1", "Nothing."]]);
+    const known = prior([card], {}, [cut("book~old", 0, "r1"), page("other", 1, "o1")]);
+    const merged = mergeReview(input({ prior: known, checked: ["third"], items: [{ id: "book", label: "Book", included: true }, { id: "other", label: "other", included: true }, { id: "third", label: "third", included: true }],
+      run: { ...input({}).run, pages: [cut("book~new", 0, "r2"), page("other", 1, "o1"), page("third", 2, "t1")] },
+      texts: new Map([["book~new", { rev: "r2", text: "Her eyes were green." }], ["other", { rev: "o1", text: "Nothing." }], ["third", { rev: "t1", text: "More." }]]) }));
+    expect(merged.pruned).toEqual([]);
+    expect(merged.review.issues.map((i) => i.issue_id)).toEqual(["card"]);
+  });
+
+  it("an unticked chapter has not gone: its cards and its record stay", () => {
+    const card = issue("card", [["a", "a1", "Her eyes were green."], ["left", "l1", "Her eyes were brown."]]);
+    const onlyLeft = issue("only", [["left", "l1", "Her eyes were brown."]]);
+    const known = prior([card, onlyLeft], { ...LEDGER, left: { rev: "l1", order: 3, policyId: POLICY, checkedAt: 1 } }, [page("a", 0, "a1"), page("b", 1, "b1"), page("c", 2, "c1"), page("left", 3, "l1")]);
+    const merged = mergeReview(input({ prior: known, items: [...input({}).items, { id: "left", label: "left", included: false }] }));
+    expect(merged.pruned).toEqual([]);
+    expect(merged.review.issues.map((i) => i.issue_id)).toEqual(["card", "only"]);
+    expect(merged.review.ledger.left?.rev).toBe("l1");
+  });
+
+  it("a chapter taken out of the plan altogether has gone", () => {
+    const card = issue("card", [["a", "a1", "Her eyes were green."], ["left", "l1", "Her eyes were brown."]]);
+    const known = prior([card], LEDGER, [page("a", 0, "a1"), page("left", 3, "l1")]);
+    expect(mergeReview(input({ prior: known })).pruned).toEqual(["card"]);
+  });
+
   it("reopens only a card closed as fixed, and keeps a dismissal or a decision", () => {
     const old = issue("old", [["a", "a1", "Her eyes were green."], ["b", "b1", "Her eyes were brown."]]);
     const again = issue("old", [["a", "a1", "Her eyes were green."], ["b", "b2", "Her eyes were brown today."]]);

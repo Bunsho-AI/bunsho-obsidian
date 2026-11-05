@@ -106,6 +106,8 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
     capped: false,
     /** Finds nothing this run, as model variance can. */
     findNothing: false,
+    /** What it answers a cancel with; without one it only closes, and the charge stays unknown. */
+    cancelFrame: null,
     /** Answers under another read policy. */
     readPolicy: null,
     failWith, tamper, tickMs, ...more,
@@ -154,7 +156,10 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
     const refuse = (code, message, charged = false) => { socket.send(frame("error", { code, message, charged })); return socket.close(1011); };
     socket.on("message", (data) => {
       const message = JSON.parse(data.toString());
-      if (message.type === "cancel") return socket.close(1000);
+      if (message.type === "cancel") {
+        if (options.cancelFrame) socket.send(frame("error", options.cancelFrame));
+        return socket.close(1000);
+      }
       if (message.type === "start") {
         start = message.payload; starts.push(start);
         if (Object.keys(start).some((key) => !START_KEYS.has(key))) return refuse("invalid_request", "That request was not valid. You were not charged.");

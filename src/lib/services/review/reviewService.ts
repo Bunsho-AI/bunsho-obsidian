@@ -23,8 +23,6 @@ export interface RunReviewInput {
   /** The price the writer saw; the engine refuses a review that would cost more. */
   maxCredits?: number;
   callbacks?: PipelineV3ReviewCallbacks;
-  /** The book's cast, for the World tab. */
-  onCast?: (cast: CastMember[]) => void;
   signal?: AbortSignal;
   /** Plan items to check. Absent: a full review. Every other item goes as passages, whichever way it is cut. */
   scope?: ReadonlySet<string> | null;
@@ -43,6 +41,8 @@ export interface ReviewRun extends MergeRun {
   texts: Map<string, CurrentChapter>;
   /** A chapter check that could not compare against the book, so it may not be recorded as checked. */
   alone: boolean;
+  /** Findings that did not survive the journey (grounding or the frame check). What they said is unknown, so nothing can be proved gone. */
+  lostFindings: number;
   cachedReads: number;
 }
 
@@ -101,7 +101,6 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRun> {
     { start: { ...startBase, cachedReads }, pages: checkedUnits.map((u) => ({ pageId: u.pageId, text: u.text })), passages: selection?.passages ?? [] },
     input.callbacks, input.signal);
 
-  input.onCast?.(result.cast);
   const grounding = new Map<string, GroundingPage>(units.map((u) => [u.pageId, { pageId: u.pageId, pageOrder: u.order, rev: u.rev, text: u.text }]));
   const grounded = groundIssues(result.issues, snapshot, grounding);
   const unread = new Set(result.unreadPages ?? []);
@@ -126,6 +125,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRun> {
     checked: [...whole],
     texts: new Map(units.map((u) => [u.pageId, { rev: u.rev, text: u.text }])),
     alone,
+    lostFindings: grounded.droppedIssues + (result.malformedIssues ?? 0),
     cachedReads: cachedReads.length,
   };
 }

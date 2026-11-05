@@ -281,6 +281,7 @@ export function mergeReview(input: MergeInput): MergeResult {
   const kept = adoptPriorFindings(unedited, priorClusters, textOf, (pageId) => chapterOf.get(pageId) ?? pageId);
   const survivors = new Set(kept.map((issue) => issue.issue_id));
 
+  const planned = new Set(input.items.map((item) => item.id));
   const unread = new Set(run.unreadPages.filter((pageId) => input.checked.includes(pageId)));
   const failed = input.checked.filter((pageId) => edited.has(pageId) || unread.has(pageId));
   const done = input.alone ? [] : input.checked.filter((pageId) => !failed.includes(pageId));
@@ -297,7 +298,16 @@ export function mergeReview(input: MergeInput): MergeResult {
   if (input.reason === "sweep" && done.length > 0 && !stale && !run.capped) {
     const clusters = issues.map((issue) => clusterOf(issue, input.statusOf(issue.issue_id)));
     const checked = new Set(done);
-    const sets = pipelineV3PruneSets(clusters, survivors, checked, input.texts);
+    // A chapter that has not gone is still there, however it is cut or if the writer has unticked it. An old cut stands for its
+    // chapter as it now reads, and counts as checked when every piece of the chapter was. An unticked chapter was not read.
+    const current = new Map(input.texts);
+    for (const page of prior?.pages ?? []) {
+      if (current.has(page.pageId) || !planned.has(page.sourceId)) continue;
+      const parts = run.pages.filter((p) => p.sourceId === page.sourceId);
+      current.set(page.pageId, { rev: "", text: textOf.get(page.pageId) ?? "" });
+      if (parts.length > 0 && parts.every((p) => checked.has(p.pageId))) checked.add(page.pageId);
+    }
+    const sets = pipelineV3PruneSets(clusters, survivors, checked, current);
     const keep = new Set(sets.keep);
     const retired = new Set(sets.stale);
     pruned = clusters.filter((cluster) => !keep.has(cluster.clusterKey) && (retired.has(cluster.clusterKey)
@@ -308,7 +318,9 @@ export function mergeReview(input: MergeInput): MergeResult {
 
   const inBook = new Set(run.pages.map((page) => page.pageId));
   const ledger: PageLedger = {};
-  if (input.scope === "chapters") for (const [pageId, entry] of Object.entries(prior?.ledger ?? {})) if (inBook.has(pageId)) ledger[pageId] = entry;
+  // An unticked chapter keeps its record: its cards and World still stand on it.
+  const unticked = new Set((prior?.pages ?? []).filter((page) => input.items.some((item) => item.id === page.sourceId && !item.included)).map((page) => page.pageId));
+  if (input.scope === "chapters") for (const [pageId, entry] of Object.entries(prior?.ledger ?? {})) if (inBook.has(pageId) || unticked.has(pageId)) ledger[pageId] = entry;
   const sent = new Map(run.pages.map((page) => [page.pageId, page]));
   for (const pageId of done) {
     const page = sent.get(pageId);
@@ -317,7 +329,7 @@ export function mergeReview(input: MergeInput): MergeResult {
 
   // A page a surviving finding still cites stays known, so its passage can still be opened and named.
   const cited = new Set(issues.flatMap(citedPages));
-  const pages = [...run.pages, ...(prior?.pages ?? []).filter((page) => !inBook.has(page.pageId) && cited.has(page.pageId))];
+  const pages = [...run.pages, ...(prior?.pages ?? []).filter((page) => !inBook.has(page.pageId) && (cited.has(page.pageId) || unticked.has(page.pageId)))];
 
   const included = input.items.filter((item) => item.included);
   const review: ReviewOutcome = {

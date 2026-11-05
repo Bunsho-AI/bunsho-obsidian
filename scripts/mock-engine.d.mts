@@ -8,6 +8,7 @@ export interface MockBehaviour {
   unread: string[] | "all";
   capped: boolean;
   findNothing: boolean;
+  cancelFrame: MockFailure | null;
   readPolicy: string | null;
   failWith: string | null;
   tamper: boolean | "prior";

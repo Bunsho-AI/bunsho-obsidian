@@ -19,7 +19,8 @@ interface Options {
   world?: Iterable<[string, string]>;
   data?: Record<string, unknown>;
   active?: () => string | null;
-  afterSend?: () => void;
+  /** Runs as the world file is written. */
+  onWorldWrite?: () => Promise<void>;
 }
 
 async function setup(options: Options) {
@@ -36,7 +37,7 @@ async function setup(options: Options) {
       adapter: {
         exists: (path: string) => Promise.resolve(stored.has(path)),
         read: (path: string) => Promise.resolve(stored.get(path) ?? ""),
-        write: (path: string, text: string) => { stored.set(path, text); return Promise.resolve(); },
+        write: async (path: string, text: string) => { stored.set(path, text); await options.onWorldWrite?.(); },
         remove: (path: string) => { stored.delete(path); return Promise.resolve(); },
       },
       read: (file: { path: string }) => Promise.resolve(notes[file.path]),
@@ -397,10 +398,11 @@ describe("check if fixed: a false fixed is the worst outcome", () => {
   });
 
   const edited = async () => {
-    const made = await checked();
-    made.notes["Book/b.md"] = "Mira read the letter.\nHer eyes were green.";
+    const made = await checked({ notes: { ...BOOK(), "Book/a.md": "Mira stepped ashore.\nHer eyes were green.\nThe boat was red.", "Book/b.md": "Mira read the letter.\nHer eyes were brown.\nThe boat was blue." } });
+    expect(made.controller.currentReview()!.issues).toHaveLength(2);
+    made.notes["Book/b.md"] = "Mira read the letter.\nHer eyes were green.\nThe boat was blue.";
     await rescan(made.controller);
-    return { ...made, id: onlyIssue(made.controller).issue_id };
+    return { ...made, id: made.controller.currentReview()!.issues.find((i) => i.type === "trait_contradiction")!.issue_id };
   };
 
   it("does not close on a failed review, and says so", async () => {
@@ -491,6 +493,27 @@ describe("check if fixed: a false fixed is the worst outcome", () => {
     expect(onlyIssue(controller).citations[0].page_id).not.toBe(cited.page_id);
   });
 
+  it("does not close when the engine's answer lost a finding on the way: it may have been this one", async () => {
+    const { controller, id } = await edited();
+    // The boat is still contradicted; its current passage is not an exact slice of what was sent, so grounding drops the finding.
+    engine!.options.tamper = true;
+    expect((await controller.recheck(id, 36)).kind).toBe("complete");
+    expect(controller.data.fixed).toEqual([]);
+  });
+
+  it("a sign-out while the result is being kept brings nothing back", async () => {
+    let signOut: (() => Promise<void>) | null = null;
+    const made = await checked({ onWorldWrite: async () => { const go = signOut; signOut = null; if (go) { void go(); await new Promise((done) => setTimeout(done, 20)); } } });
+    const { controller, notes, data } = made;
+    const { issue_id: id } = onlyIssue(controller);
+    notes["Book/b.md"] = "Mira read the letter.\nHer eyes were green.";
+    await rescan(controller);
+    signOut = () => controller.signOut();
+    await controller.recheck(id, 36);
+    expect(data().lastReview).toBeNull();
+    expect(data().fixed).toEqual([]);
+  });
+
   it("only the card asked about can close: another finding the same check did not repeat stays open", async () => {
     const notes = { "Book/a.md": "Her eyes were green.\nThe boat was red.", "Book/b.md": "Her eyes were brown.\nThe boat was blue.", "Book/c.md": "Nothing." };
     const { controller } = await checked({ notes });
@@ -578,6 +601,22 @@ describe("stopped reviews", () => {
     expect(controller.phase.kind).toBe("idle");
   });
 
+  it("a read the post-review scan could not confirm is still kept, having been paid for", async () => {
+    let fail = false;
+    const notes = BOOK();
+    const made = await checked({ notes });
+    const { controller, stored } = made;
+    const app = (controller as unknown as { host: { app: { vault: { read: (f: { path: string }) => Promise<string> } } } }).host.app;
+    const read = app.vault.read;
+    app.vault.read = (f) => (fail ? Promise.reject(new Error("locked")) : read(f));
+    const run = controller.check();
+    while (controller.phase.kind !== "checking") await new Promise((done) => setTimeout(done, 1));
+    fail = true;
+    await run;
+    fail = false;
+    expect((JSON.parse(stored.get(WORLD)!) as { reads: unknown[] }).reads).not.toEqual([]);
+  });
+
   it("the World keeps showing a page as of its last check after a stopped run read a newer revision", async () => {
     const { controller, notes } = await checked();
     const row = controller.worldEntities()![0].rows.find((r) => r.value === "green")!;
@@ -594,6 +633,8 @@ describe("stopped reviews", () => {
     engine!.options.refuseCached = true;
     await controller.checkChapter(itemId(controller, "a"), 36);
     expect(controller.phase).toMatchObject({ kind: "error" });
+    // No retry of a chapter check: with the reads gone it would be refused. The whole-book check is the way back.
+    expect((controller.phase as { action?: unknown }).action).toBeUndefined();
     expect((JSON.parse(stored.get(WORLD)!) as { reads: Array<{ readPolicyId: unknown }> }).reads.every((e) => e.readPolicyId === null)).toBe(true);
     expect(controller.chapterChecksOpen()).toBe(false);
     expect(controller.worldEntities()).not.toBeNull();
@@ -626,14 +667,42 @@ describe("stopped reviews", () => {
     expect(controller.stoppedReview()).toMatchObject({ status: "partial", message: null });
   });
 
+  const cancelMidRun = async (controller: ContinuityController) => {
+    const run = controller.reviewChanged(36);
+    while (controller.phase.kind !== "checking") await new Promise((done) => setTimeout(done, 1));
+    while (engine!.starts.length === 0) await new Promise((done) => setTimeout(done, 1));
+    await new Promise((done) => setTimeout(done, 15));
+    controller.cancel();
+    await run;
+  };
+
+  it("a cancelled review the engine says it charged says so, and stays pending", async () => {
+    const { controller, notes } = await checked();
+    notes["Book/c.md"] = "Something else happens here.";
+    await rescan(controller);
+    engine!.options.tickMs = 200;
+    engine!.options.cancelFrame = { code: "cancelled", message: "Review cancelled. This review was charged.", charged: true };
+    await cancelMidRun(controller);
+    expect(controller.stoppedReview()).toMatchObject({ status: "partial", checked: 0, total: 1, message: "Review cancelled. This review was charged." });
+    expect(controller.changedChapters()?.count).toBe(1);
+  });
+
+  it("a cancelled review whose charge is unknown does not pretend it was free", async () => {
+    const { controller, notes } = await checked();
+    notes["Book/c.md"] = "Something else happens here.";
+    await rescan(controller);
+    engine!.options.tickMs = 200;
+    await cancelMidRun(controller);
+    expect(controller.stoppedReview()).toMatchObject({ status: "partial", message: "Review cancelled." });
+  });
+
   it("a cancelled review the engine did not charge leaves nothing behind", async () => {
     const { controller, notes } = await checked();
     notes["Book/c.md"] = "Something else happens here.";
     await rescan(controller);
-    const run = controller.reviewChanged(36);
-    while (controller.phase.kind !== "checking") await new Promise((done) => setTimeout(done, 1));
-    controller.cancel();
-    await run;
+    engine!.options.tickMs = 200;
+    engine!.options.cancelFrame = { code: "cancelled", message: "Review cancelled. You were not charged.", charged: false };
+    await cancelMidRun(controller);
     expect(controller.phase.kind).toBe("idle");
     expect(controller.stoppedReview()).toBeNull();
     expect(controller.changedChapters()?.count).toBe(1);
