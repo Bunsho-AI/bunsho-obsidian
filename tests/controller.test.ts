@@ -50,7 +50,7 @@ async function setup({ notes, host = {}, read, world = [], data: savedData = {},
     confirmCheck: (): Promise<CheckAnswer> => Promise.resolve("check"),
     reviewPlan: (r) => Promise.resolve(planOf(r)),
     pickSource: () => Promise.resolve(null),
-    confirmReplaceProject: () => Promise.resolve(true),
+    pickIssue: () => Promise.resolve(null), confirmReplaceProject: () => Promise.resolve(true),
     ...host,
   });
   await controller.load();
@@ -443,7 +443,7 @@ describe("older data", () => {
     const fresh = new ContinuityController({
       app: { secretStorage: { getSecret: () => "", setSecret: () => undefined }, vault: { adapter: { exists: () => Promise.resolve(false) } } } as never, version: "0", dir: "x", openPanel: () => Promise.resolve(), changed: () => undefined,
       loadData: () => Promise.resolve({ manuscriptFolder: " /My Book/ ", lastReview: { chapters: [], issues: [] } }), saveData: () => Promise.resolve(),
-      confirmCheck: () => Promise.resolve("cancel"), reviewPlan: () => Promise.resolve(null), pickSource: () => Promise.resolve(null), confirmReplaceProject: () => Promise.resolve(false),
+      confirmCheck: () => Promise.resolve("cancel"), reviewPlan: () => Promise.resolve(null), pickSource: () => Promise.resolve(null), pickIssue: () => Promise.resolve(null), confirmReplaceProject: () => Promise.resolve(false),
     });
     await fresh.load();
     expect(fresh.data.source).toEqual({ kind: "folder", path: "My Book" });

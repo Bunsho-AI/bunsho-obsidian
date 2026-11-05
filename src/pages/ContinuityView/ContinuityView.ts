@@ -5,20 +5,26 @@
 import { ItemView, Notice, type WorkspaceLeaf } from "obsidian";
 import { BUNSHO_ICON_ID } from "@/assets/logo";
 import { FillButton } from "@/atoms/FillButton";
-import type { ContinuityController } from "@/controllers/ContinuityController";
+import type { ContinuityController, RecheckResult } from "@/controllers/ContinuityController";
 import { AiNotice } from "@/atoms/AiNotice";
 import { QuietButton } from "@/atoms/QuietButton";
 import { TextAction } from "@/atoms/TextAction";
 import { Fact } from "@/atoms/Fact";
 import type { PageMeta } from "@/helpers/sources";
+import type { ReviewOutcome } from "@/helpers/reviewMerge";
+import type { StoppedReview } from "@/types";
 import type { EngineIssue, EngineIssueCitation } from "@/lib/contract/engine.types";
 import { AlertCard } from "@/molecules/AlertCard";
 import { BrandHeader } from "@/molecules/BrandHeader";
 import { EmptyState } from "@/molecules/EmptyState";
 import { StatusRow } from "@/molecules/StatusRow";
 import { cardEvidence, displayOrder, nextOpenIssue, railEvidence, resolutionOf, resolverContext } from "@/helpers/findings";
+import { filterBySpectrum, orderSpectrumByCount, type SpectrumKey } from "@/helpers/spectrum";
+import { ChangedChaptersRow } from "@/molecules/ChangedChaptersRow";
+import { CheckChapterControl } from "@/molecules/CheckChapterControl";
+import { SpectrumChips } from "@/molecules/SpectrumChips";
 import { FindingsList, type FindingItem, type ResolvedItem } from "@/organisms/FindingsList";
-import { ResolverPanel } from "@/organisms/ResolverPanel";
+import { ResolverPanel, type ResolverPanelProps } from "@/organisms/ResolverPanel";
 import { WorldList } from "@/organisms/WorldList";
 import { PanelTabs } from "@/molecules/PanelTabs";
 import { PANEL_TABS, type PanelTabId } from "@/helpers/panelTabs";
@@ -48,6 +54,16 @@ export class ContinuityView extends ItemView {
   /** A decision is being saved: the screen's buttons wait for it, as the desktop's do. */
   private settling = false;
   private tab: PanelTabId = "continuity";
+  private spectrum: SpectrumKey | null = null;
+  /** The price the writer is looking at in Check chapter's confirm. It is what gets sent, whatever a later scan says. */
+  private confirming: { id: string; label: string; credits: number } | null = null;
+  /** The finding Check if fixed is running for. */
+  private rechecking: string | null = null;
+  private resolverFeedback: { id: string; tone: "success" | "danger"; message: string } | null = null;
+  /** A card Check if fixed closed: said over the list, since its Resolve screen has gone. */
+  private listFeedback: string | null = null;
+  /** The keyboard goes to Cancel once a review's status row shows it. */
+  private focusCancel = false;
   private worldFilter: WorldFilter = "people";
   private worldSearch = "";
   private readonly worldOpen = new Set<string>();
@@ -64,7 +80,64 @@ export class ContinuityView extends ItemView {
   getDisplayText(): string { return "Bunsho"; }
   getIcon(): string { return BUNSHO_ICON_ID; }
 
-  async onOpen(): Promise<void> { this.render(); await this.controller.refresh(); }
+  async onOpen(): Promise<void> {
+    // Outside the confirm closes it, as on the desktop. Click, not mousedown: redrawing mid-press would lose the press.
+    this.registerDomEvent(this.contentEl.ownerDocument, "click", (event) => {
+      if (!this.confirming) return;
+      const { target } = event;
+      // instanceOf, not instanceof: a panel in a pop-out window has its own HTMLElement.
+      if (target instanceof Object && (target as Node).instanceOf?.(HTMLElement) && (target as HTMLElement).isConnected && !(target as HTMLElement).closest(".bunsho-chapter-control")) this.closeConfirm(null);
+    });
+    this.render();
+    await this.controller.refresh();
+  }
+
+  /** The writer moved to another note: Check chapter now means that one. */
+  activeFileChanged(): void { this.confirming = null; this.render(); }
+
+  /** Check chapter from the command palette: the same confirm as the button. */
+  askChapterCheck(): void {
+    this.tab = "continuity";
+    this.resolving = null;
+    this.openConfirm();
+  }
+
+  private openConfirm(): void {
+    const target = this.controller.chapterTarget();
+    if (!target) return;
+    this.confirming = target;
+    this.focusNext = "chapter:confirm";
+    this.render();
+  }
+
+  private closeConfirm(focus: string | null): void {
+    this.confirming = null;
+    if (focus) this.focusNext = focus;
+    this.render();
+  }
+
+  /** Runs a review from the panel. The keyboard waits on Cancel, then goes to the first of `after` still there, unless the writer has moved on. */
+  private async runReview(start: () => Promise<void>, after: () => readonly string[]): Promise<void> {
+    this.focusCancel = true;
+    this.listFeedback = null;
+    this.render();
+    await start();
+    this.focusCancel = false;
+    this.render();
+    this.settleFocus(after());
+  }
+
+  /** Only when the keyboard is in the panel or nowhere: a writer who went back to their note is left there. */
+  private settleFocus(keys: readonly string[]): void {
+    const root = this.contentEl;
+    const doc = root.ownerDocument;
+    const active = doc.activeElement;
+    if (active && active !== doc.body && !root.contains(active)) return;
+    for (const key of keys) {
+      const element = root.querySelector<HTMLElement>(`[data-focus-key="${doc.defaultView?.CSS.escape(key) ?? ""}"]`);
+      if (element) { element.focus({ preventScroll: true }); return; }
+    }
+  }
 
   render(): void {
     if (this.composing) { this.renderWaiting = true; return; } // rebuilding the field would end the writer's IME composition
@@ -100,6 +173,10 @@ export class ContinuityView extends ItemView {
     } else if (focusKey) {
       root.querySelector<HTMLElement>(`[data-focus-key="${root.ownerDocument.defaultView?.CSS.escape(focusKey) ?? ""}"]`)?.focus({ preventScroll: true });
     }
+    if (this.focusCancel && c.phase.kind === "checking") {
+      this.focusCancel = false;
+      this.settleFocus(["status:cancel"]);
+    }
   }
 
   private renderContent(body: HTMLElement): void {
@@ -132,7 +209,7 @@ export class ContinuityView extends ItemView {
     const { phase, scan } = c;
     if (phase.kind === "checking") {
       const fact = phase.waiting ? "starting the check…" : `reviewing ${Math.round(phase.share * 100)}% · ${STAGE_LABEL[phase.stage ?? ""] ?? "reading"}`;
-      StatusRow(root, { fact, reading: true, action: { label: "Cancel", onClick: () => c.cancel() } });
+      StatusRow(root, { fact, reading: true, action: { label: "Cancel", focusKey: "status:cancel", onClick: () => c.cancel() } });
       return;
     }
     if (phase.kind === "preparing" || phase.kind === "confirming") {
@@ -144,10 +221,26 @@ export class ContinuityView extends ItemView {
     const review = c.currentReview();
     const sources = scan.items.filter((item) => item.included).length;
     const parts = [`${formatNumber(sources)} ${c.noun(sources)}`, `${formatNumber(scan.words)} words`];
-    if (review) parts.push(scan.snapshotId === review.snapshotId ? `checked ${formatShortDate(review.checkedAt)}` : "edited since last check");
+    const stopped = c.stoppedReview();
+    if (stopped) parts.push(this.stoppedFact(stopped));
+    else if (review) parts.push(this.isCurrent(review) ? `checked ${formatShortDate(review.checkedAt)}` : "edited since last check");
     // One priced action: before the first check it is the empty state's button, after it this link.
     const showAction = review !== null && c.account.project !== "blocked";
     StatusRow(root, { fact: parts.join(" · "), action: showAction ? { label: this.checkLabel(), onClick: () => void c.check() } : undefined });
+  }
+
+  /** Whether the book is as last checked. Once chapter checks are open that is the ledger's to say, page by page. */
+  private isCurrent(review: ReviewOutcome): boolean {
+    const c = this.controller;
+    const { scan } = c;
+    return c.chapterChecksOpen() ? c.changedChapters() === null : scan.status === "ready" && scan.snapshotId === review.snapshotId;
+  }
+
+  /** The desktop's status line for a review that did not finish. Counts are plan items, never reading units. */
+  private stoppedFact(stopped: StoppedReview): string {
+    if (stopped.status === "out_of_credits") return `${stopped.checked}/${stopped.total} reviewed \u00b7 stopped`;
+    const gap = Math.min(stopped.total, Math.max(stopped.failed, stopped.total - stopped.checked, 0));
+    return `${stopped.checked}/${stopped.total} reviewed \u00b7 ${gap} partial`;
   }
 
   /** At most one alert card. Returns true when it replaces the rest of the panel. */
@@ -163,7 +256,22 @@ export class ContinuityView extends ItemView {
       return true;
     }
     if (phase.kind === "error") {
-      AlertCard(body, { title: phase.charged ? "The check stopped" : "The check did not run", body: phase.message });
+      if (phase.action) this.renderReviewFailed(body, phase.message, phase.charged ?? false);
+      else AlertCard(body, { title: phase.charged ? "The check stopped" : "The check did not run", body: phase.message });
+      return false;
+    }
+    const stopped = c.stoppedReview();
+    if (stopped?.status === "out_of_credits" && (stopped.credits === null || account.balance === null || account.balance < stopped.credits)) {
+      // Fixed copy: it answers "did I lose anything?" before the action.
+      const card = AlertCard(body, { label: "Out of credits", title: stopped.total > 0 ? `The review stopped at chapter ${stopped.checked} of ${stopped.total}` : undefined,
+        body: "Your existing issues are preserved \u2014 nothing was cleared." });
+      const actions = card.createDiv({ cls: "bunsho-alert-actions" });
+      FillButton(actions, { label: "Open billing", small: true, onClick: () => window.open(UPGRADE_URL) });
+      if (account.balance !== null) Fact(actions, `${formatNumber(account.balance)} left`);
+      return false;
+    }
+    if (stopped?.status === "partial" && stopped.message) {
+      AlertCard(body, { title: "The review stopped", body: stopped.message, action: { label: "Dismiss", onClick: () => { this.focusNext = c.changedChapters() ? "changed:review" : "tab:continuity"; void c.dismissStopped(); } } });
       return false;
     }
     const price = c.price();
@@ -174,6 +282,55 @@ export class ContinuityView extends ItemView {
     }
     if (account.problem) AlertCard(body, { title: "Bunsho is unreachable", body: account.problem });
     return false;
+  }
+
+  /** Bunsho's answer to a review that failed: the engine's own words, and the same review again at what it costs now. No Resume: a retry is a new review, and is charged. */
+  private renderReviewFailed(body: HTMLElement, message: string, charged: boolean): void {
+    const c = this.controller;
+    const card = AlertCard(body, { label: "Review failed", body: charged ? `${message} Trying again is charged again.` : message });
+    const quote = c.retryQuote();
+    const actions = card.createDiv({ cls: "bunsho-alert-actions" });
+    const retry = actions.createEl("button", { cls: "bunsho-retry", text: quote === null ? "Try again" : `Try again \u00b7 ~${formatNumber(quote)} credits`, attr: { "data-focus-key": "alert:retry" } });
+    retry.onclick = () => void this.runReview(() => c.retry(), () => ["alert:retry", "changed:review", "chapter:open", "tab:continuity"]);
+  }
+
+  /** What is priced and what is free above the list: changed chapters first, as the desktop's row is, then the check and the picker. */
+  private renderLoopTools(body: HTMLElement, open: readonly EngineIssue[], pages: Map<string, PageMeta>): void {
+    const c = this.controller;
+    if (c.phase.kind === "checking" || c.phase.kind === "preparing" || c.phase.kind === "confirming") return;
+    const changed = c.changedChapters();
+    if (changed) {
+      const one = changed.count === 1;
+      ChangedChaptersRow(body, {
+        message: `${formatNumber(changed.count)} ${one ? "chapter has" : "chapters have"} changed since your last check`,
+        label: `Review ${formatNumber(changed.count)} changed ${one ? "chapter" : "chapters"} \u00b7 ~${formatNumber(changed.credits)} credits`,
+        onReview: () => void this.runReview(() => c.reviewChanged(changed.credits), () => ["changed:review", "chapter:open", "tab:continuity"]),
+      });
+    }
+    const target = c.chapterTarget();
+    if (!target && open.length === 0) return;
+    const row = body.createDiv({ cls: "bunsho-loop-tools" });
+    if (target) {
+      CheckChapterControl(row, {
+        label: target.label, confirming: this.confirming,
+        onOpen: () => { if (this.confirming) this.closeConfirm("chapter:open"); else this.openConfirm(); },
+        onCancel: () => this.closeConfirm("chapter:open"),
+        onConfirm: () => {
+          const { confirming } = this;
+          if (!confirming) return;
+          this.confirming = null;
+          void this.runReview(() => c.checkChapter(confirming.id, confirming.credits), () => ["chapter:open", "tab:continuity"]);
+        },
+      });
+    }
+    if (open.length > 0) TextAction(row, { label: "Jump to issue", quiet: true, focusKey: "jump:open", onClick: () => void this.jumpToIssue(open, pages) });
+  }
+
+  /** Opens what the writer picks, on its Resolve screen. */
+  private async jumpToIssue(open: readonly EngineIssue[], pages: Map<string, PageMeta>): Promise<void> {
+    const picked = await this.controller.pickIssue(open, (issue) => { const evidence = cardEvidence(issue); return evidence ? this.coordinate(evidence, pages) : ""; });
+    if (picked) this.openResolver(picked.issue_id);
+    else this.settleFocus(["jump:open"]);
   }
 
   private renderFindings(body: HTMLElement): void {
@@ -187,8 +344,14 @@ export class ContinuityView extends ItemView {
     }
     const dismissed = new Set(c.data.dismissed);
     const deliberate = new Set(c.data.deliberate);
+    const fixed = new Set(c.data.fixed);
     const pages = new Map(review.pages.map((page) => [page.pageId, page]));
-    const open = displayOrder(review.issues.filter((i) => !resolutionOf(i.issue_id, dismissed, deliberate)));
+    const allOpen = displayOrder(review.issues.filter((i) => !resolutionOf(i.issue_id, dismissed, deliberate, fixed)));
+    if (allOpen.length === 0) this.spectrum = null;
+    const open = filterBySpectrum(allOpen, this.spectrum);
+    this.renderLoopTools(body, allOpen, pages);
+    if (this.listFeedback) body.createDiv({ cls: "bunsho-feedback is-success", text: this.listFeedback, attr: { role: "status" } });
+    SpectrumChips(body, { chips: orderSpectrumByCount(allOpen), active: this.spectrum, onSelect: (spectrum) => { this.spectrum = spectrum; this.listFeedback = null; this.render(); } });
     const toItem = (issue: EngineIssue): FindingItem => {
       const evidence = cardEvidence(issue);
       return {
@@ -197,18 +360,19 @@ export class ContinuityView extends ItemView {
         severity: issue.severity,
         quote: evidence?.quoted_text ?? null,
         coordinate: evidence ? this.coordinate(evidence, pages) : "",
-        onDismiss: () => { this.focusNext = this.focusAfter(open, issue.issue_id); void this.decide(() => c.dismiss(issue.issue_id, true)); },
+        onDismiss: () => { this.focusNext = this.focusAfter(allOpen, issue.issue_id); void this.decide(() => c.dismiss(issue.issue_id, true)); },
         onResolve: () => this.openResolver(issue.issue_id),
       };
     };
     const resolved: ResolvedItem[] = review.issues.flatMap((issue) => {
-      const status = resolutionOf(issue.issue_id, dismissed, deliberate);
+      const status = resolutionOf(issue.issue_id, dismissed, deliberate, fixed);
       return status ? [{ id: issue.issue_id, claim: issue.message, status, onRestore: () => { this.focusNext = `resolve:${issue.issue_id}`; void this.decide(() => c.restoreFinding(issue.issue_id)); } }] : [];
     });
     FindingsList(body, {
       open: open.map(toItem),
       resolved,
       anyFindings: review.issues.length > 0,
+      filteredOut: allOpen.length > 0 && open.length === 0,
       coverage: { read: review.coverage.sources.length - review.coverage.unreadSources.length, total: review.coverage.sources.length, excluded: review.coverage.excluded,
         noun: c.noun(review.coverage.sources.length), unreadLabels: review.coverage.sources.filter((source) => review.coverage.unreadSources.includes(source.id)).map((source) => source.label) },
       showResolved: this.showResolved,
@@ -219,6 +383,7 @@ export class ContinuityView extends ItemView {
   private openResolver(id: string): void {
     if (!this.resolving) this.listScroll = this.contentEl.scrollTop;
     this.resolving = id;
+    this.listFeedback = null;
     this.focusNext = "resolver:close";
     this.resetScroll = true;
     this.render();
@@ -232,7 +397,7 @@ export class ContinuityView extends ItemView {
   }
 
   /** Where the keyboard goes when a finding leaves the list: the next one, or the tab when none is left. */
-  private focusAfter(open: EngineIssue[], id: string): string {
+  private focusAfter(open: readonly EngineIssue[], id: string): string {
     const next = nextOpenIssue(open, id);
     return next ? `resolve:${next.issue_id}` : "tab:continuity";
   }
@@ -257,9 +422,10 @@ export class ContinuityView extends ItemView {
     const issue = review?.issues.find((i) => i.issue_id === this.resolving);
     const dismissed = new Set(c.data.dismissed);
     const deliberate = new Set(c.data.deliberate);
-    if (!review || !issue || resolutionOf(issue.issue_id, dismissed, deliberate)) { this.resolving = null; return false; }
+    const fixed = new Set(c.data.fixed);
+    if (!review || !issue || resolutionOf(issue.issue_id, dismissed, deliberate, fixed)) { this.resolving = null; return false; }
     const pages = new Map(review.pages.map((page) => [page.pageId, page]));
-    const open = displayOrder(review.issues.filter((i) => !resolutionOf(i.issue_id, dismissed, deliberate)));
+    const open = displayOrder(review.issues.filter((i) => !resolutionOf(i.issue_id, dismissed, deliberate, fixed)));
     const next = nextOpenIssue(open, issue.issue_id);
     const id = issue.issue_id;
     const settle = async (action: () => Promise<void>) => {
@@ -274,13 +440,36 @@ export class ContinuityView extends ItemView {
       claim: issue.message,
       passages: railEvidence(issue).map((citation) => ({ quote: citation.quoted_text, coordinate: this.coordinate(citation, pages), onOpen: () => void c.jump(citation) })),
       ...resolverContext(issue),
-      busy: this.settling,
+      busy: this.settling || c.busy,
+      recheck: this.recheckProps(id, open),
+      feedback: this.resolverFeedback?.id === id ? this.resolverFeedback : null,
+      onJump: open.length > 1 ? () => void this.jumpToIssue(open, pages) : null,
       onClose: () => this.closeResolver(`resolve:${id}`),
       onDeliberate: () => void settle(() => c.markDeliberate(id, true)),
       onDismiss: () => void settle(() => c.dismiss(id, true)),
       onNext: next ? () => this.openResolver(next.issue_id) : null,
     });
     return true;
+  }
+
+  /** Check if fixed, with its price on it. While one runs the screen stays, and says so. */
+  private recheckProps(id: string, open: readonly EngineIssue[]): ResolverPanelProps["recheck"] {
+    const c = this.controller;
+    const checking = this.rechecking === id;
+    const quote = c.recheckQuote(id);
+    if (quote === null) return null;
+    return { price: `~${formatNumber(quote)} credits`, checking, onClick: () => {
+      this.rechecking = id;
+      this.resolverFeedback = null;
+      const next = this.focusAfter(open, id);
+      let result: RecheckResult = { kind: "none", message: "" };
+      void this.runReview(async () => {
+        result = await c.recheck(id, quote);
+        this.rechecking = null;
+        if (result.kind === "closed") this.listFeedback = result.message;
+        else if (result.kind !== "none") this.resolverFeedback = { id, tone: result.kind === "complete" ? "success" : "danger", message: result.message };
+      }, () => (result.kind === "closed" ? [next, "tab:continuity"] : ["resolver:recheck", next, "tab:continuity"]));
+    } };
   }
 
   private renderWorld(body: HTMLElement): void {

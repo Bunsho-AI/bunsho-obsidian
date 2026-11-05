@@ -31,7 +31,7 @@ export function resolverContext(issue: EngineIssue): ResolverContext {
 }
 
 /** The open finding after this one, wrapping; null when no other is open. */
-export function nextOpenIssue(open: EngineIssue[], currentId: string): EngineIssue | null {
+export function nextOpenIssue(open: readonly EngineIssue[], currentId: string): EngineIssue | null {
   const others = open.filter((issue) => issue.issue_id !== currentId);
   if (others.length === 0) return null;
   const at = open.findIndex((issue) => issue.issue_id === currentId);

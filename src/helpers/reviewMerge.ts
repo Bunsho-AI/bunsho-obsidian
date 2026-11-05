@@ -38,6 +38,14 @@ export interface ReviewOutcome {
   ledger: PageLedger;
 }
 
+/** A saved ledger, keeping only well-formed entries: data.json can be synced or hand-edited. Null when it is not a ledger at all. */
+export function parseLedger(value: unknown): PageLedger | null {
+  if (!record(value)) return null;
+  const valid = (entry: unknown): entry is LedgerEntry => record(entry) && typeof entry.rev === "string" && typeof entry.order === "number"
+    && typeof entry.policyId === "string" && typeof entry.checkedAt === "number";
+  return Object.fromEntries(Object.entries(value).filter((pair): pair is [string, LedgerEntry] => valid(pair[1])));
+}
+
 /** The desktop's words for a card's state. A card the writer has not settled is open; closed_auto is "no longer detected". */
 export type FindingStatus = "open" | "dismissed" | "closed_manual" | "closed_auto";
 

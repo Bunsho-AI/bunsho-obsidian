@@ -4,11 +4,11 @@
  */
 import { Notice, type App } from "obsidian";
 import { forgetCached, mergeCast, pruneReads, worldReads, type KeptRead } from "@/helpers/reads";
-import { itemsPending, mergeReview, SAVE_MESSAGE, type FindingStatus, type MergeResult, type PageLedger } from "@/helpers/reviewMerge";
+import { itemsPending, mergeReview, parseLedger, SAVE_MESSAGE, type FindingStatus, type MergeResult, type PageLedger } from "@/helpers/reviewMerge";
 import { applyPlan, buildItems, buildUnits, dropNoteIds, holdsNoteId, itemAtOffset, moveNoteIds, planQuote, snapshotId, sourceContains, sourceProblems, type PlannedItem, type SavedPlan, type SourceChoice } from "@/helpers/sources";
 import { countWords } from "@/lib/contract/countWords";
 import { ProgressTracker } from "@/helpers/progress";
-import type { EngineIssueCitation } from "@/lib/contract/engine.types";
+import type { EngineIssue, EngineIssueCitation } from "@/lib/contract/engine.types";
 import { PipelineV3Client, PipelineV3Error } from "@/lib/contract/pipelineV3Client";
 import { PIPELINE_V3_LIMITS, PIPELINE_V3_PRICE_OP, type ChapterRead, type PipelineV3Health } from "@/lib/contract/pipelineV3.types";
 import { pipelineV3ReviewCredits } from "@/lib/contract/pipelineV3Pricing";
@@ -59,6 +59,8 @@ export interface ControllerHost {
   reviewPlan(request: PlanRequest): Promise<PlanAnswer | null>;
   /** Asks the writer to pick a folder or note; null when they do not. */
   pickSource(options: ReturnType<typeof sourceOptions>): Promise<SourceChoice | null>;
+  /** The Jump to issue picker; null when the writer closes it. */
+  pickIssue(open: readonly EngineIssue[], coordinate: (issue: EngineIssue) => string): Promise<EngineIssue | null>;
   /** Confirms switching the free project to this vault. */
   confirmReplaceProject(currentName: string | null): Promise<boolean>;
   /** Re-render whatever shows the state. */
@@ -94,8 +96,8 @@ function validStopped(value: unknown): value is StoppedReview {
 
 /** A review from before the ledger: the pages it read, under no policy, so none of them can count as checked for a chapter check. */
 function ledgerOf(review: ReviewOutcome): PageLedger {
-  const ledger = (review as Partial<ReviewOutcome>).ledger;
-  if (ledger && typeof ledger === "object" && !Array.isArray(ledger)) return ledger;
+  const ledger = parseLedger((review as { ledger?: unknown }).ledger);
+  if (ledger) return ledger;
   const unread = new Set(review.coverage?.unreadSources ?? []);
   return Object.fromEntries(review.pages.filter((page) => !unread.has(page.sourceId))
     .map((page) => [page.pageId, { rev: page.rev, order: page.order, policyId: "", checkedAt: review.checkedAt }]));
@@ -774,6 +776,9 @@ export class ContinuityController {
     if (action.kind === "changes") return this.reviewChanged(quoted);
     return this.checkChapter(action.itemId, quoted);
   }
+
+  /** Jump to issue. Free and local. */
+  pickIssue(open: readonly EngineIssue[], coordinate: (issue: EngineIssue) => string): Promise<EngineIssue | null> { return this.host.pickIssue(open, coordinate); }
 
   /** What stopped the last review, when it is about what is picked now. */
   stoppedReview(): StoppedReview | null {

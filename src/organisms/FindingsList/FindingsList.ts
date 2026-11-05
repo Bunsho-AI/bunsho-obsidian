@@ -17,6 +17,8 @@ export interface FindingsListProps {
   open: FindingItem[];
   resolved: ResolvedItem[];
   anyFindings: boolean;
+  /** A filter is on, and none of the open findings match it. */
+  filteredOut: boolean;
   coverage: FindingsCoverage;
   showResolved: boolean;
   onToggleShowResolved: () => void;
@@ -27,7 +29,8 @@ export function FindingsList(parent: HTMLElement, props: FindingsListProps): voi
   const lower = props.open.filter((f) => f.severity !== "error");
   const { coverage } = props;
 
-  if (props.open.length === 0) EmptyState(parent, { title: props.anyFindings ? "No open findings" : "No contradictions found" });
+  if (props.filteredOut) parent.createEl("p", { cls: "bunsho-filter-none", text: "No issues match the current filter" });
+  else if (props.open.length === 0) EmptyState(parent, { title: props.anyFindings ? "No open findings" : "No contradictions found" });
   const left = coverage.excluded > 0 ? ` \u00b7 ${coverage.excluded} left out by you` : "";
   Fact(parent, `${coverage.read} of ${coverage.total} ${coverage.noun} read in full${left}`, "bunsho-note");
   if (coverage.unreadLabels.length > 0) {

@@ -49,7 +49,7 @@ async function setup(options: Options) {
   const controller = new ContinuityController({
     app: app as never, version: "0.1.0", dir: "plugins/bunsho", loadData: () => Promise.resolve(data), saveData: (next: PluginData) => { data = next; return Promise.resolve(); },
     openPanel: () => Promise.resolve(), changed: () => undefined, confirmCheck: () => Promise.resolve("check"), reviewPlan: (r) => { plans++; return Promise.resolve(planOf(r)); },
-    pickSource: () => Promise.resolve(null), confirmReplaceProject: () => Promise.resolve(true), ...options.host,
+    pickSource: () => Promise.resolve(null), pickIssue: () => Promise.resolve(null), confirmReplaceProject: () => Promise.resolve(true), ...options.host,
   });
   await controller.load();
   await controller.refreshAccount();
