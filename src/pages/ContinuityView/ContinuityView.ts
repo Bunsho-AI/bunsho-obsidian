@@ -12,6 +12,7 @@ import { Fact } from "@/atoms/Fact";
 import type { PageMeta } from "@/helpers/sources";
 import type { ReviewOutcome } from "@/helpers/reviewMerge";
 import type { StoppedReview } from "@/types";
+import type { CanonTarget } from "@/helpers/canon/pen";
 import type { EngineIssue, EngineIssueCitation } from "@/lib/contract/engine.types";
 import { AlertCard } from "@/molecules/AlertCard";
 import { BrandHeader } from "@/molecules/BrandHeader";
@@ -30,6 +31,8 @@ import { WorldList } from "@/organisms/WorldList";
 import { PanelTabs } from "@/molecules/PanelTabs";
 import { PANEL_TABS, type PanelTabId } from "@/helpers/panelTabs";
 import { worldChanges, type WorldEntity, type WorldFilter } from "@/helpers/world";
+import { lapsedTitle } from "@/helpers/account";
+import { PEN_FAILURE_COPY, WorldPen } from "@/pages/ContinuityView/WorldPen";
 import { SourcePrompt } from "@/organisms/SourcePrompt";
 import { SignInPanel } from "@/organisms/SignInPanel";
 import { formatNumber, formatShortDate } from "@/utils/format";
@@ -74,8 +77,23 @@ export class ContinuityView extends ItemView {
   private composing = false;
   private renderWaiting = false;
   private resetScroll = false;
+  private readonly pen: WorldPen;
+  /** Why a Revert on the Resolve screen did not land. */
+  private revertFailure: { id: string; message: string } | null = null;
 
-  constructor(leaf: WorkspaceLeaf, private readonly controller: ContinuityController) { super(leaf); }
+  constructor(leaf: WorkspaceLeaf, private readonly controller: ContinuityController) {
+    super(leaf);
+    this.pen = new WorldPen(controller, {
+      redraw: (focusKey) => { if (focusKey) this.focusNext = focusKey; this.render(); },
+      composing: (composing) => this.setComposing(composing),
+      expand: (entityId) => { this.worldOpen.add(entityId); },
+    });
+  }
+
+  private setComposing(composing: boolean): void {
+    this.composing = composing;
+    if (!composing && this.renderWaiting) { this.renderWaiting = false; this.render(); }
+  }
 
   getViewType(): string { return VIEW_TYPE; }
   getDisplayText(): string { return "Bunsho"; }
@@ -147,6 +165,9 @@ export class ContinuityView extends ItemView {
     const active = root.ownerDocument.activeElement;
     const search = root.querySelector<HTMLInputElement>(".bunsho-world-search");
     const caret = search && active === search ? [search.selectionStart, search.selectionEnd] as const : null;
+    // The pen's fields too: a rescan or an account refresh can arrive while the writer types.
+    const penField = active && root.contains(active) && active.classList.contains("bunsho-pen-field") && !this.focusNext ? active as HTMLInputElement : null;
+    const penCaret = penField ? [penField.selectionStart, penField.selectionEnd] as const : null;
     const focusKey = this.focusNext ?? (active && root.contains(active) ? active.getAttribute("data-focus-key") : null);
     this.focusNext = null;
     const scroll = this.scrollNext ?? (this.resetScroll ? 0 : root.scrollTop);
@@ -172,7 +193,9 @@ export class ContinuityView extends ItemView {
       field?.focus({ preventScroll: true });
       field?.setSelectionRange(caret[0], caret[1]);
     } else if (focusKey) {
-      root.querySelector<HTMLElement>(`[data-focus-key="${root.ownerDocument.defaultView?.CSS.escape(focusKey) ?? ""}"]`)?.focus({ preventScroll: true });
+      const element = root.querySelector<HTMLElement>(`[data-focus-key="${root.ownerDocument.defaultView?.CSS.escape(focusKey) ?? ""}"]`);
+      element?.focus({ preventScroll: true });
+      if (penCaret) (element as HTMLInputElement | null)?.setSelectionRange?.(penCaret[0], penCaret[1]);
     }
     if (this.focusCancel && c.phase.kind === "checking") {
       this.focusCancel = false;
@@ -310,6 +333,14 @@ export class ContinuityView extends ItemView {
         onReview: () => void this.runReview(() => c.reviewChanged(changed.credits), () => ["changed:review", "chapter:open", "tab:continuity"]),
       });
     }
+    const canon = c.canonOffer();
+    if (canon) {
+      ChangedChaptersRow(body, {
+        message: "Your canon changed since the book was last checked against it",
+        label: `Check canon \u00b7 ~${formatNumber(canon.credits)} credits`, focusKey: "canon:check",
+        onReview: () => void this.runReview(() => c.checkCanon(canon.credits), () => ["canon:check", "changed:review", "chapter:open", "tab:continuity"]),
+      });
+    }
     const target = c.chapterTarget();
     if (!target && open.length === 0) return;
     const row = body.createDiv({ cls: "bunsho-loop-tools" });
@@ -357,13 +388,17 @@ export class ContinuityView extends ItemView {
     SpectrumChips(body, { chips: [...orderSpectrumByCount(allOpen), ...(this.spectrum && open.length === 0 ? [{ key: this.spectrum, count: 0 }] : [])], active: this.spectrum, onSelect: (spectrum) => { this.spectrum = spectrum; this.listFeedback = null; this.render(); } });
     const toItem = (issue: EngineIssue): FindingItem => {
       const evidence = cardEvidence(issue);
+      const conflict = c.canonConflict(issue);
+      const onDismiss = () => { this.focusNext = this.focusAfter(allOpen, issue.issue_id); void this.decide(() => c.dismiss(issue.issue_id, true)); };
       return {
+        ...(conflict ? { canon: { id: issue.issue_id, severity: issue.severity, title: conflict.title, quote: conflict.page.quoted_text, coordinate: conflict.coordinate, factLabel: conflict.factLabel,
+          value: conflict.context.pinnedValue, mark: conflict.mark, more: conflict.more.map((extra) => extra.line), factId: conflict.factId, onResolve: () => this.openResolver(issue.issue_id), onDismiss } } : {}),
         id: issue.issue_id,
         claim: issue.message,
         severity: issue.severity,
         quote: evidence?.quoted_text ?? null,
         coordinate: evidence ? this.coordinate(evidence, pages) : "",
-        onDismiss: () => { this.focusNext = this.focusAfter(allOpen, issue.issue_id); void this.decide(() => c.dismiss(issue.issue_id, true)); },
+        onDismiss,
         onResolve: () => this.openResolver(issue.issue_id),
       };
     };
@@ -439,8 +474,12 @@ export class ContinuityView extends ItemView {
       if (saved && this.resolving === id) this.closeResolver(this.focusAfter(open, id));
       else this.render();
     };
+    const conflict = c.canonConflict(issue);
     ResolverPanel(body, {
       claim: issue.message,
+      canon: conflict ? { factLabel: conflict.factLabel, value: conflict.context.pinnedValue, mark: conflict.mark, failure: this.revertFailure?.id === id ? this.revertFailure.message : null,
+        // A successful Revert leaves the card until the next check, with nothing left to revert.
+        onRevert: conflict.pinned && c.penOpen ? () => void this.revertConflict(id, conflict.target) : null } : null,
       passages: railEvidence(issue).map((citation) => ({ quote: citation.quoted_text, coordinate: this.coordinate(citation, pages), onOpen: () => void c.jump(citation) })),
       ...resolverContext(issue),
       busy: this.settling || c.busy,
@@ -453,6 +492,14 @@ export class ContinuityView extends ItemView {
       onNext: next ? () => this.openResolver(next.issue_id) : null,
     });
     return true;
+  }
+
+  private async revertConflict(id: string, target: CanonTarget): Promise<void> {
+    const result = await this.controller.revertFact(target);
+    // Stale: the record is no longer the one shown. The control rests, with no error to read.
+    this.revertFailure = result.success || result.code === "STALE_TARGET" || result.code === "NOT_FOUND" ? null : { id, message: PEN_FAILURE_COPY };
+    this.focusNext = "resolver:close";
+    this.render();
   }
 
   /** Check if fixed, with its price on it. While one runs the screen stays, and says so. */
@@ -477,29 +524,23 @@ export class ContinuityView extends ItemView {
 
   private renderWorld(body: HTMLElement): void {
     const c = this.controller;
-    const entities = c.worldEntities();
-    if (!entities) {
-      const box = EmptyState(body, { title: "Your story's world",
-        body: "After a check, Bunsho lists your people, places, things and groups, and what changes between chapters, with the passage each fact comes from. It costs nothing extra." });
-      if (c.phase.kind === "idle" || c.phase.kind === "error") FillButton(box, { label: this.checkLabel(), onClick: () => void c.check() });
-      return;
-    }
-    if (entities !== this.worldShown) {
-      this.worldShown = entities;
-      this.worldOpen.clear();
+    const found = c.worldEntities();
+    const entities = c.worldRecord();
+    // Cast ids mean something within one check. A pen write keeps the same check, and the cards stay as the writer left them.
+    if (found !== this.worldShown) {
+      if (found && this.worldShown) this.worldOpen.clear();
+      this.worldShown = found;
       this.worldHistory.clear();
     }
+    const { lapsed } = c.account;
     const toggle = (set: Set<string>, id: string) => { if (!set.delete(id)) set.add(id); this.render(); };
     const pages = new Map(c.currentReview()?.pages.map((page) => [page.pageId, page.label]));
     WorldList(body, {
-      entities, changes: worldChanges(entities), coordinate: (pageId) => pages.get(pageId) ?? "another chapter", filter: this.worldFilter, search: this.worldSearch, expanded: this.worldOpen, history: this.worldHistory,
+      entities, changes: worldChanges(found ?? []), pen: this.pen.slots(), lapsedTitle: lapsed ? lapsedTitle(lapsed) : null, onRenew: () => window.open(UPGRADE_URL), coordinate: (pageId) => pages.get(pageId) ?? "another chapter", filter: this.worldFilter, search: this.worldSearch, expanded: this.worldOpen, history: this.worldHistory,
       gaps: c.worldGaps(), factNote: (row) => c.factNote(row),
       onFilter: (filter) => { this.worldFilter = filter; this.resetScroll = true; this.render(); },
       onSearch: (search) => { this.worldSearch = search; },
-      onComposing: (composing) => {
-        this.composing = composing;
-        if (!composing && this.renderWaiting) { this.renderWaiting = false; this.render(); }
-      },
+      onComposing: (composing) => this.setComposing(composing),
       onToggle: (id) => toggle(this.worldOpen, id),
       onToggleHistory: (id) => toggle(this.worldHistory, id),
       onGo: (row) => void c.jumpToFact(row),
