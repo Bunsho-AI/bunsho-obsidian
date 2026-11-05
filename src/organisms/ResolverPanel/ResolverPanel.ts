@@ -13,8 +13,13 @@ export interface ResolverPanelProps {
   note: string | null;
   subject: string | null;
   summary: string | null;
-  /** A decision is being saved. */
+  /** A decision is being saved, or a check is running. */
   busy: boolean;
+  /** Check if fixed: the one filled control, with its price on it. Null when it cannot run. */
+  recheck: { price: string; checking: boolean; onClick: () => void } | null;
+  /** What the last Check if fixed found. The message is shown as it came. */
+  feedback: { tone: "success" | "danger"; message: string } | null;
+  onJump: (() => void) | null;
   onClose: () => void;
   onDeliberate: () => void;
   onDismiss: () => void;
@@ -43,6 +48,8 @@ export function ResolverPanel(parent: HTMLElement, props: ResolverPanelProps): v
   const close = head.createEl("button", { cls: "bunsho-resolver-close", text: "×", attr: { "aria-label": "Close", "data-focus-key": "resolver:close" } });
   close.onclick = props.onClose;
 
+  if (props.onJump) TextAction(root.createDiv({ cls: "bunsho-resolver-jump" }), { label: "Jump to issue", quiet: true, focusKey: "jump:open", onClick: props.onJump });
+
   const rail = root.createDiv({ cls: "bunsho-list" });
   props.passages.forEach((passage, index) => block(rail, index === 0 ? "This page" : "Contradicts", index === 0, passage, index));
   if (props.note) {
@@ -57,7 +64,16 @@ export function ResolverPanel(parent: HTMLElement, props: ResolverPanelProps): v
     if (props.summary) context.createDiv({ cls: "bunsho-context-block", text: props.summary });
   }
 
+  if (props.feedback) root.createDiv({ cls: `bunsho-feedback is-${props.feedback.tone}`, text: props.feedback.message, attr: { role: "status" } });
   const bar = root.createDiv({ cls: "bunsho-decision-bar" });
+  if (props.recheck) {
+    const { recheck } = props;
+    const fill = bar.createEl("button", { cls: "bunsho-recheck", attr: { "data-focus-key": "resolver:recheck" } });
+    fill.createSpan({ text: recheck.checking ? "Checking..." : "Check if fixed" });
+    if (!recheck.checking) fill.createSpan({ cls: "bunsho-recheck-price", text: recheck.price });
+    fill.disabled = props.busy;
+    fill.onclick = recheck.onClick;
+  }
   button(bar, "This is deliberate", "is-success", "deliberate", props.busy, props.onDeliberate);
   button(bar, "Dismiss", "", "dismiss", props.busy, props.onDismiss);
   if (props.onNext) button(bar, "Next Issue →", "is-next", "next", props.busy, props.onNext);
