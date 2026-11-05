@@ -20,6 +20,7 @@
   --bunsho-desk-quote: 'Bunsho Literata', var(--font-text), Georgia, serif;
   --bunsho-desk-fact: 'Bunsho Courier Prime', var(--font-monospace), ui-monospace, monospace;
   padding: 0 !important;
+  scroll-padding: 44px 0 72px; /* a focused control is never left under the sticky top line or foot */
   font-family: var(--font-interface);
   color: var(--text-normal);
 }
@@ -158,7 +159,12 @@ button.bunsho-decision:focus-visible, button.bunsho-resolver-close:focus-visible
 .bunsho-wordmark img { height: 100%; width: auto; max-width: none; user-select: none; }
 .bunsho-wordmark-dark, .theme-dark .bunsho-wordmark-light { display: none; }
 .theme-dark .bunsho-wordmark-dark { display: block; }
-.bunsho-brand { display: flex; align-items: center; padding: 10px 12px 0; }
+/* In view however far the list scrolls, as the foot is */
+.bunsho-brand {
+  position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 10px; padding: 10px 12px 6px;
+  background: var(--background-secondary);
+}
+.bunsho-account { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .bunsho-signin { display: flex; flex-direction: column; align-items: center; text-align: center; }
 .bunsho-signin .bunsho-wordmark { margin-bottom: 16px; }
 .bunsho-signin .bunsho-empty-body { max-width: 300px; }
@@ -184,11 +190,13 @@ button.bunsho-google:hover { background: #f8f9fa; box-shadow: 0 1px 2px rgba(60,
 /* The panel is a column so the AI notice stays at the bottom, as on desktop */
 .bunsho-panel { display: flex; flex-direction: column; }
 .bunsho-panel > * { flex: none; }
-.bunsho-ai-notice {
+.bunsho-panel-foot {
   /* Obsidian's status bar floats over the bottom right of the window */
-  position: sticky; bottom: 0; margin-top: auto; padding: 8px 12px 32px; font-size: 11px; line-height: 1.4; color: var(--text-muted);
+  position: sticky; bottom: 0; z-index: 2; margin-top: auto; padding: 8px 12px 32px;
   background: var(--background-secondary); border-top: 1px solid var(--background-modifier-border);
 }
+.bunsho-ai-notice { font-size: 11px; line-height: 1.4; color: var(--text-muted); }
+.bunsho-panel-foot button.bunsho-text-action { margin-top: 2px; font-size: 11px; }
 
 /* Reading plan */
 .bunsho-plan-head { font-size: 13px; line-height: 1.5; color: var(--text-muted); margin-bottom: 10px; }
@@ -205,7 +213,7 @@ button.bunsho-plan-move:disabled { opacity: 0.3; cursor: default; }
 
 /* Panel tabs, and the World tab's filter row */
 .bunsho-tabs { display: flex; gap: 14px; margin-bottom: 12px; border-bottom: 1px solid var(--background-modifier-border); }
-.bunsho-tabs.is-filter { gap: 12px; border-bottom: none; margin-bottom: 8px; }
+.bunsho-tabs.is-filter { flex-wrap: wrap; gap: 2px 12px; border-bottom: none; margin-bottom: 8px; }
 button.bunsho-tab {
   all: unset; cursor: pointer; padding: 2px 0 6px; margin-bottom: -1px; font-family: var(--font-interface); font-size: 12px; color: var(--text-muted);
   border-bottom: 2px solid transparent;
@@ -236,6 +244,18 @@ button.bunsho-world-head:focus-visible { outline: 2px solid var(--bunsho-accent)
 .bunsho-world-value { color: var(--text-normal); }
 .bunsho-world-row .bunsho-passage { margin-top: 3px; }
 .bunsho-world-more { margin-top: 8px; }
+/* One change between chapters: the desktop's lower-tier card, value struck through and the new one standing */
+.bunsho-timeline { background: var(--bunsho-card-soft); border: 1px solid var(--bunsho-border-hair); border-radius: 6px; padding: 10px; font-family: var(--bunsho-desk-ui); overflow-wrap: anywhere; }
+.bunsho-timeline-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; }
+.bunsho-timeline-name { font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--bunsho-text-1); }
+.bunsho-timeline-label { font-size: 13px; color: var(--bunsho-text-3); }
+.bunsho-timeline-values { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; margin-top: 4px; font-size: 13px; }
+.bunsho-timeline-old { color: var(--bunsho-text-2); text-decoration: line-through; }
+.bunsho-timeline-new { color: var(--bunsho-text-1); font-weight: 500; }
+.bunsho-timeline-arrow { color: var(--bunsho-text-3); font-size: 11px; }
+.bunsho-timeline-places { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; margin-top: 3px; font-size: 11px; }
+.bunsho-timeline-places button.bunsho-text-action { font-family: var(--bunsho-desk-fact); font-size: 11px; color: var(--bunsho-text-3); text-align: left; }
+.bunsho-timeline .bunsho-fact { margin-top: 3px; font-family: var(--bunsho-desk-fact); color: var(--bunsho-text-3); }
 .bunsho-world-pills { display: flex; flex-wrap: wrap; gap: 4px; }
 button.bunsho-world-pill {
   all: unset; cursor: pointer; font-size: 11px; padding: 3px 9px; border-radius: 999px; color: var(--text-normal); overflow-wrap: anywhere;

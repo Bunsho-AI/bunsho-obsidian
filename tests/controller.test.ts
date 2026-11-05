@@ -451,3 +451,49 @@ describe("older data", () => {
     expect(controller.data.source).toEqual(FOLDER);
   });
 });
+
+describe("the account line and contact support", () => {
+  const notes = { "Book/01.md": "Mira stepped off the ferry.\n" };
+
+  it("reads the plan name with the balance, and forgets both on sign-out", async () => {
+    const { controller } = await setup({ notes });
+    engine!.options.paid = true;
+    await controller.refreshAccount();
+    expect(controller.account).toMatchObject({ planName: "Storyteller", balance: 100_000 });
+    engine!.options.paid = false;
+    await controller.refreshAccount();
+    expect(controller.account.planName).toBe("Free");
+  });
+
+  it("the balance follows a check that spent credits, without a reload", async () => {
+    const { controller } = await setup({ notes });
+    engine!.options.enforce = true;
+    await withConfirmedPlan(controller);
+    const before = controller.account.balance;
+    await controller.check();
+    expect(controller.account.balance).toBe((before ?? 0) - 36);
+  });
+
+  it("claims no plan when the engine cannot say", async () => {
+    const { controller } = await setup({ notes });
+    engine!.options.subscriptionDown = true;
+    await controller.refreshAccount();
+    expect(controller.account).toMatchObject({ planName: null, balance: 100_000, project: "unknown", signedIn: true });
+  });
+
+  it("contact support opens a draft in the writer's mail app, sending nothing itself", async () => {
+    const { controller } = await setup({ notes });
+    const opened: unknown[][] = [];
+    const before = engine!.requests.length;
+    const hadWindow = "window" in globalThis;
+    const previous = (globalThis as { window?: unknown }).window;
+    (globalThis as { window?: unknown }).window = { open: (...args: unknown[]) => { opened.push(args); return null; } };
+    try {
+      controller.contactSupport();
+    } finally {
+      if (hadWindow) (globalThis as { window?: unknown }).window = previous; else delete (globalThis as { window?: unknown }).window;
+    }
+    expect(opened).toEqual([["mailto:support@bunsho.io?subject=Bunsho%20for%20Obsidian%200.1.0", "_external"]]);
+    expect(engine!.requests.length).toBe(before);
+  });
+});

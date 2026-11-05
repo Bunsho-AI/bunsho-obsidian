@@ -10,13 +10,17 @@ export interface MockBehaviour {
   findNothing: boolean;
   cancelFrame: MockFailure | null;
   readPolicy: string | null;
+  paid: boolean;
+  tier: string;
+  enforce: boolean;
+  subscriptionDown: boolean;
   failWith: string | null;
   tamper: boolean | "prior";
   tickMs: number;
   policyId?: string;
   currentReadPolicy?: string;
 }
-export interface MockEngineOptions extends Partial<MockBehaviour> { port?: number; balance?: number; holdOpen?: boolean; paid?: boolean; registered?: { workspaceId: string; name?: string | null } | null; starter?: number; readingParts?: boolean; enforce?: boolean }
+export interface MockEngineOptions extends Partial<MockBehaviour> { port?: number; balance?: number; holdOpen?: boolean; registered?: { workspaceId: string; name?: string | null } | null; starter?: number; readingParts?: boolean }
 export interface MockStart {
   reviewId: string;
   scope: string;

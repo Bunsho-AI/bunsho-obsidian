@@ -6,7 +6,6 @@ import { ItemView, Notice, type WorkspaceLeaf } from "obsidian";
 import { BUNSHO_ICON_ID } from "@/assets/logo";
 import { FillButton } from "@/atoms/FillButton";
 import type { ContinuityController, RecheckResult } from "@/controllers/ContinuityController";
-import { AiNotice } from "@/atoms/AiNotice";
 import { QuietButton } from "@/atoms/QuietButton";
 import { TextAction } from "@/atoms/TextAction";
 import { Fact } from "@/atoms/Fact";
@@ -17,7 +16,9 @@ import type { EngineIssue, EngineIssueCitation } from "@/lib/contract/engine.typ
 import { AlertCard } from "@/molecules/AlertCard";
 import { BrandHeader } from "@/molecules/BrandHeader";
 import { EmptyState } from "@/molecules/EmptyState";
+import { PanelFoot } from "@/molecules/PanelFoot";
 import { StatusRow } from "@/molecules/StatusRow";
+import { accountSummary } from "@/helpers/account";
 import { cardEvidence, displayOrder, nextOpenIssue, railEvidence, resolutionOf, resolverContext } from "@/helpers/findings";
 import { filterBySpectrum, orderSpectrumByCount, type SpectrumKey } from "@/helpers/spectrum";
 import { ChangedChaptersRow } from "@/molecules/ChangedChaptersRow";
@@ -28,7 +29,7 @@ import { ResolverPanel, type ResolverPanelProps } from "@/organisms/ResolverPane
 import { WorldList } from "@/organisms/WorldList";
 import { PanelTabs } from "@/molecules/PanelTabs";
 import { PANEL_TABS, type PanelTabId } from "@/helpers/panelTabs";
-import type { WorldEntity, WorldFilter } from "@/helpers/world";
+import { worldChanges, type WorldEntity, type WorldFilter } from "@/helpers/world";
 import { SourcePrompt } from "@/organisms/SourcePrompt";
 import { SignInPanel } from "@/organisms/SignInPanel";
 import { formatNumber, formatShortDate } from "@/utils/format";
@@ -159,12 +160,12 @@ export class ContinuityView extends ItemView {
       SignInPanel(root, { problem: c.account.problem, onSignIn: () => void c.signIn() });
       return;
     }
-    BrandHeader(root);
+    BrandHeader(root, accountSummary(c.account.planName, c.account.balance));
     this.renderStatus(root);
     const body = root.createDiv({ cls: "bunsho-body" });
     if (!this.renderAlert(body)) this.renderContent(body);
     // Like the desktop's Continuity tab: one quiet line, always there, never a popup.
-    AiNotice(root);
+    PanelFoot(root, { onContactSupport: () => c.contactSupport() });
     root.scrollTop = scroll;
     if (caret) {
       const field = root.querySelector<HTMLInputElement>(".bunsho-world-search");
@@ -479,7 +480,7 @@ export class ContinuityView extends ItemView {
     const entities = c.worldEntities();
     if (!entities) {
       const box = EmptyState(body, { title: "Your story's world",
-        body: "After a check, Bunsho lists your people, places and things, with the passage each fact comes from. It costs nothing extra." });
+        body: "After a check, Bunsho lists your people, places, things and groups, and what changes between chapters, with the passage each fact comes from. It costs nothing extra." });
       if (c.phase.kind === "idle" || c.phase.kind === "error") FillButton(box, { label: this.checkLabel(), onClick: () => void c.check() });
       return;
     }
@@ -489,8 +490,9 @@ export class ContinuityView extends ItemView {
       this.worldHistory.clear();
     }
     const toggle = (set: Set<string>, id: string) => { if (!set.delete(id)) set.add(id); this.render(); };
+    const pages = new Map(c.currentReview()?.pages.map((page) => [page.pageId, page.label]));
     WorldList(body, {
-      entities, filter: this.worldFilter, search: this.worldSearch, expanded: this.worldOpen, history: this.worldHistory,
+      entities, changes: worldChanges(entities), coordinate: (pageId) => pages.get(pageId) ?? "another chapter", filter: this.worldFilter, search: this.worldSearch, expanded: this.worldOpen, history: this.worldHistory,
       gaps: c.worldGaps(), factNote: (row) => c.factNote(row),
       onFilter: (filter) => { this.worldFilter = filter; this.resetScroll = true; this.render(); },
       onSearch: (search) => { this.worldSearch = search; },

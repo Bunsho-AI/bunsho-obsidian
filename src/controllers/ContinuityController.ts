@@ -16,6 +16,7 @@ import { activeNotePosition, selectPassage } from "@/lib/obsidian/editor";
 import { secretSessionStore } from "@/lib/obsidian/secretStore";
 import { readSourceNotes, sourceOptions } from "@/lib/obsidian/vault";
 import { readWorld, removeWorld, writeWorld, type WorldData } from "@/lib/obsidian/worldStore";
+import { SUPPORT_EMAIL, supportMailto } from "@/helpers/support";
 import { projectWorld, type WorldEntity, type WorldRow } from "@/helpers/world";
 import { AUTH_CONFIG } from "@/lib/services/auth/authConfig";
 import { AuthError, TokenSource } from "@/lib/services/auth/authService";
@@ -287,7 +288,7 @@ export class ContinuityController {
         const [health, balance, project] = await Promise.all([
           new PipelineV3Client(transport).health(), readBalance(transport), readProjectState(transport, this.data.workspaceId),
         ]);
-        next = { signedIn, health, balance, problem: null, project: project.state, registeredName: project.registeredName };
+        next = { signedIn, health, balance, planName: project.planName, problem: null, project: project.state, registeredName: project.registeredName };
       } catch (error) {
         if (error instanceof AuthError && error.code === "signed_out") await this.forgetSession();
         next = error instanceof AuthError && error.code === "signed_out" ? { ...SIGNED_OUT, problem: error.message }
@@ -305,6 +306,12 @@ export class ContinuityController {
   private priceFor(chars: number, health: PipelineV3Health | null): number | null {
     if (!health) return null;
     return pipelineV3ReviewCredits({ op: PIPELINE_V3_PRICE_OP, creditsPerThousandChars: health.pricing.creditsPerThousandChars, minimumUnits: health.pricing.minimumUnits }, chars);
+  }
+
+  /** A draft in the writer's own mail app; the address is in the notice too, in case there is no mail app to open. */
+  contactSupport(): void {
+    new Notice(`Opening an email to ${SUPPORT_EMAIL} in your mail app.`);
+    window.open(supportMailto(this.host.version), "_external");
   }
 
   async signIn(): Promise<void> {

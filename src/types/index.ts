@@ -78,6 +78,8 @@ export type Phase =
 export interface Account {
   signedIn: boolean;
   balance: number | null;
+  /** The plan's name, or null when the engine could not say (never read as Free). */
+  planName: string | null;
   health: PipelineV3Health | null;
   problem: string | null;
   /** The Free tier's one-project rule for this vault (helpers/project.ts). */
@@ -85,4 +87,4 @@ export interface Account {
   registeredName: string | null;
 }
 
-export const SIGNED_OUT: Account = { signedIn: false, balance: null, health: null, problem: null, project: "unknown", registeredName: null };
+export const SIGNED_OUT: Account = { signedIn: false, balance: null, planName: null, health: null, problem: null, project: "unknown", registeredName: null };
