@@ -14,6 +14,9 @@ describe("planName", () => {
   it("shows a tier it does not know yet by its key, as the desktop does", () => {
     expect(planName({ active: true, tier: "novelist" })).toBe("novelist");
   });
+  it("is not fooled by a tier named like an object's own property", () => {
+    expect(planName({ active: true, tier: "constructor" })).toBe("constructor");
+  });
   it("claims no plan when it cannot tell: a paying writer is never told they are on Free", () => {
     expect(planName(null)).toBeNull();
     expect(planName("nope")).toBeNull();

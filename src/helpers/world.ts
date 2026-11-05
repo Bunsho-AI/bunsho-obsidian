@@ -106,7 +106,8 @@ const personOnly = (dimension: string): boolean => dimension.startsWith("appeara
 /**
  * The groups the reads carry. The engine's cast leaves `group` records out (its stages/cast.ts), so they are read here, one
  * group to a written name: joining two names is the identity judgment a string match must not make. A name the cast holds stays
- * the cast's, so a group never changes who a fact is about.
+ * the cast's, so a group never changes who a fact is about. A group no reader gave a proper name is listed but files no fact:
+ * the crew of two ships shares a written name and is not one crew.
  */
 function groupsInReads(reads: readonly ChapterRead[], cast: readonly CastMember[]): CastMember[] {
   const held = new Set(cast.flatMap(memberNames).map(nameKey));
@@ -115,20 +116,32 @@ function groupsInReads(reads: readonly ChapterRead[], cast: readonly CastMember[
     for (const record of read.cast) {
       const key = nameKey(record.name);
       if (record.kind !== "group" || !key || held.has(key)) continue;
-      const group = groups.get(key) ?? { id: `group:${key}`, name: record.name, kind: "group", names: [record.name], properNames: [record.name], aliases: [], chapters: [], roles: [], introduced: [] };
+      const group = groups.get(key) ?? { id: `group:${key}`, name: record.name, kind: "group", names: [record.name], properNames: [], aliases: [], chapters: [], roles: [], introduced: [] };
+      const free = record.names.filter((n) => !held.has(nameKey(n.name)));
+      const proper = free.filter((n) => n.proper).map((n) => n.name);
       groups.set(key, { ...group,
         chapters: group.chapters.includes(read.order) ? group.chapters : [...group.chapters, read.order],
-        names: [...group.names, ...record.names.map((n) => n.name).filter((name) => !held.has(nameKey(name)))] });
+        names: [...group.names, ...free.map((n) => n.name)],
+        properNames: proper.length > 0 ? [...new Set([group.name, ...group.properNames, ...proper])] : group.properNames });
     }
   }
   return [...groups.values()];
 }
 
-export function projectWorld(cast: readonly CastMember[], reads: readonly ChapterRead[]): WorldEntity[] {
-  const sorted = [...reads].sort((a, b) => a.order - b.order);
+/** Where the book stands now, when the reads were made before a move: story order and the chapter (a plan item) of each page. */
+export interface WorldPlacement {
+  order?: ReadonlyMap<string, number>;
+  chapter?: ReadonlyMap<string, string>;
+}
+
+export function projectWorld(cast: readonly CastMember[], reads: readonly ChapterRead[], placement: WorldPlacement = {}): WorldEntity[] {
+  const orderOf = (read: ChapterRead): number => placement.order?.get(read.pageId) ?? read.order;
+  const chapterOf = (pageId: string): string => placement.chapter?.get(pageId) ?? pageId;
+  const sorted = [...reads].sort((a, b) => orderOf(a) - orderOf(b));
   const members = [...cast, ...groupsInReads(sorted, cast)].sort(firstAppearance);
   const holders = new Map<string, CastMember[]>();
   for (const member of members) {
+    if (member.kind === "group" && member.properNames.length === 0) continue;
     for (const key of new Set(memberNames(member).map(nameKey).filter(Boolean))) holders.set(key, [...(holders.get(key) ?? []), member]);
   }
 
@@ -167,7 +180,7 @@ export function projectWorld(cast: readonly CastMember[], reads: readonly Chapte
       const bucket = buckets.get(filed.key) ?? [];
       buckets.set(filed.key, bucket);
       const row: WorldRow = { key: `${filed.key}\u0000${read.pageId}\u0000${fact.span.start}`, label: filed.label, value: (fact.value as string).trim(), quote: fact.quote,
-        pageId: read.pageId, start: fact.span.start, end: fact.span.end, earlier: false, order: read.order };
+        pageId: read.pageId, start: fact.span.start, end: fact.span.end, earlier: false, order: orderOf(read) };
       const last = bucket[bucket.length - 1];
       // What lasts keeps its first value (a later different one is a finding, not the world). What changes records each change.
       if (!last) bucket.push(row);
@@ -185,7 +198,7 @@ export function projectWorld(cast: readonly CastMember[], reads: readonly Chapte
       rows: buckets.flat(),
       changes: buckets.flatMap((bucket) => bucket.slice(1).flatMap((to, i) => {
         const from = bucket[i];
-        return from.pageId === to.pageId ? [] : [{ key: `${member.id}\u0000${to.key}`, entityId: member.id, entityName: own, label: to.label, from, to }];
+        return chapterOf(from.pageId) === chapterOf(to.pageId) ? [] : [{ key: `${member.id}\u0000${to.key}`, entityId: member.id, entityName: own, label: to.label, from, to }];
       })),
     };
   }).sort((a, b) => b.scenes - a.scenes || a.name.localeCompare(b.name));
@@ -196,7 +209,7 @@ function fileUnder(fact: Fact, subject: CastMember, memberFor: (name: string | n
   const key = fact.dimension as string;
   if (key === "relationship" || key === "possession") {
     const other = memberFor(fact.counterpart);
-    if (!other || other.id === subject.id || (key === "possession" && ENTITY_TYPE[other.kind] === "character")) return undefined;
+    if (!other || other.id === subject.id || (key === "possession" && (ENTITY_TYPE[other.kind] === "character" || ENTITY_TYPE[other.kind] === "organization"))) return undefined;
     return { key: `${key}:${other.id}`, label: `${VOCABULARY[key].label} ${displayName(other)}` };
   }
   if (key === "stance") {

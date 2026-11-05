@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { startMockEngine } from "../scripts/mock-engine.mjs";
 import { ContinuityController, type CheckAnswer, type ControllerHost, type PlanAnswer, type PlanRequest } from "@/controllers/ContinuityController";
 import type { SourceChoice } from "@/helpers/sources";
+import { filterWorld, worldChanges } from "@/helpers/world";
 import type { PluginData } from "@/types";
 
 let engine: Awaited<ReturnType<typeof startMockEngine>> | undefined;
@@ -463,6 +464,66 @@ describe("the account line and contact support", () => {
     engine!.options.paid = false;
     await controller.refreshAccount();
     expect(controller.account.planName).toBe("Free");
+    controller.data.devUid = "";
+    await controller.signOut();
+    expect(controller.account).toMatchObject({ signedIn: false, planName: null, balance: null });
+  });
+
+  it("keeps the last plan and balance through a passing failure, and says so", async () => {
+    const { controller } = await setup({ notes });
+    await controller.refreshAccount();
+    const { port } = engine!;
+    await engine!.close();
+    await controller.refreshAccount();
+    expect(controller.account).toMatchObject({ planName: "Free", balance: 100_000, signedIn: true });
+    expect(controller.account.problem).not.toBeNull();
+    engine = await startMockEngine({ port, balance: 1 });
+  });
+
+  it("re-reads the account when the writer comes back, as credits are bought in the browser", async () => {
+    const { controller } = await setup({ notes });
+    await controller.refreshAccount();
+    const reads = () => engine!.requests.filter((r) => r.url === "/v1/credits").length;
+    const before = reads();
+    await controller.returned(1_000_000);
+    expect(reads()).toBe(before + 1);
+    await controller.returned(1_030_000); // not again within a minute
+    expect(reads()).toBe(before + 1);
+    await controller.returned(1_061_000);
+    expect(reads()).toBe(before + 2);
+  });
+
+  it("does not re-read while a check runs or when signed out", async () => {
+    const { controller } = await setup({ notes });
+    const before = () => engine!.requests.length;
+    const start = before();
+    await controller.returned(1_000_000); // signed out until the first read
+    expect(before()).toBe(start);
+    await controller.refreshAccount();
+    const read = before();
+    controller.phase = { kind: "checking", share: 0, waiting: false };
+    await controller.returned(1_000_000);
+    expect(before()).toBe(read);
+  });
+
+  it("a moved chapter turns its changes round, with no new check", async () => {
+    const { controller } = await setup({ notes: { "Book/01.md": "Mira walked to the quay.\n", "Book/02.md": "Mira went to the inn.\n" } });
+    await withConfirmedPlan(controller);
+    await controller.check();
+    const values = () => worldChanges(controller.worldEntities()!).map((c) => [c.from.value, c.to.value]);
+    expect(values()).toEqual([["the quay", "the inn"]]);
+    controller.data.plan = { ...controller.data.plan!, order: [...controller.data.plan!.order].reverse() };
+    await controller.refresh();
+    expect(values()).toEqual([["the inn", "the quay"]]);
+  });
+
+  it("a real check's reads fill Groups and Events", async () => {
+    const { controller } = await setup({ notes: { "Book/01.md": "Mira walked to the quay. The Harbour Guild met her.\n", "Book/02.md": "Mira went to the inn.\nThe Harbour Guild said nothing.\n" } });
+    await withConfirmedPlan(controller);
+    await controller.check();
+    const entities = controller.worldEntities()!;
+    expect(filterWorld(entities, "groups", "").map((e) => [e.name, e.scenes])).toEqual([["The Harbour Guild", 2]]);
+    expect(worldChanges(entities).map((c) => [c.entityName, c.label, c.from.value, c.to.value])).toEqual([["Mira", "Location", "the quay", "the inn"]]);
   });
 
   it("the balance follows a check that spent credits, without a reload", async () => {

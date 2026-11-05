@@ -20,7 +20,7 @@
   --bunsho-desk-quote: 'Bunsho Literata', var(--font-text), Georgia, serif;
   --bunsho-desk-fact: 'Bunsho Courier Prime', var(--font-monospace), ui-monospace, monospace;
   padding: 0 !important;
-  scroll-padding: 44px 0 72px; /* a focused control is never left under the sticky top line or foot */
+  scroll-padding: 60px 0 104px; /* a focused control is never left under the sticky top line or foot */
   font-family: var(--font-interface);
   color: var(--text-normal);
 }

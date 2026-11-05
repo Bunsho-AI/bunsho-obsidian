@@ -5,7 +5,7 @@
 import { formatNumber } from "@/utils/format";
 
 /** Desktop src/types/billing.ts PLAN_OPTIONS: the subscription tiers' display names. */
-const PLAN_NAMES: Readonly<Record<string, string>> = { quill: "Quill", storyteller: "Storyteller", saga: "Saga" };
+const PLAN_NAMES: ReadonlyMap<string, string> = new Map([["quill", "Quill"], ["storyteller", "Storyteller"], ["saga", "Saga"]]);
 
 /** `subscription` is the raw answer of GET /v1/billing/subscription, or null when the read failed. */
 export function planName(subscription: unknown): string | null {
@@ -14,7 +14,7 @@ export function planName(subscription: unknown): string | null {
   if (typeof active !== "boolean") return null;
   if (!active) return "Free";
   if (typeof tier !== "string" || !tier.trim()) return null;
-  return PLAN_NAMES[tier] ?? tier;
+  return PLAN_NAMES.get(tier) ?? tier;
 }
 
 /** "Storyteller · 12,345 credits", or as much of it as is known. */

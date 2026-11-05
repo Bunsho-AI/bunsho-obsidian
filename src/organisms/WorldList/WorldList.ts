@@ -39,7 +39,7 @@ const FILTERS: { id: WorldFilter; label: string; none: string }[] = [
   { id: "places", label: "Places", none: "No places yet" },
   { id: "things", label: "Things", none: "No things yet" },
   { id: "groups", label: "Groups", none: "No groups yet" },
-  { id: "events", label: "Events", none: "No changes tracked yet \u2014 Bunsho notes them as traits shift across chapters" },
+  { id: "events", label: "Events", none: "No changes tracked yet. A check notes what moves on between chapters, such as where someone is." },
 ];
 const VISIBLE_PILLS = 12;
 
@@ -72,7 +72,7 @@ function renderCard(parent: HTMLElement, entity: WorldEntity, props: WorldListPr
 }
 
 function renderChange(parent: HTMLElement, change: WorldChange, props: WorldListProps): void {
-  const place = (row: WorldRow, end: string) => ({ coordinate: props.coordinate(row.pageId), focusKey: `event:${end}:${change.key}`, onGo: () => props.onGo(row) });
+  const place = (row: WorldRow, end: string) => ({ coordinate: props.coordinate(row.pageId), focusKey: `event:${end}:${encodeURIComponent(change.key)}`, onGo: () => props.onGo(row) });
   TimelineRow(parent, { name: change.entityName, label: change.label, oldValue: change.from.value, newValue: change.to.value,
     from: place(change.from, "from"), to: place(change.to, "to"), note: props.factNote(change.from) ?? props.factNote(change.to) });
 }

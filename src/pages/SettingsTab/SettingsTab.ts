@@ -20,8 +20,8 @@ export class SettingsTab extends PluginSettingTab {
       }));
     new Setting(containerEl).setName("Privacy").setDesc("The notes you choose are sent to the Bunsho service, over an encrypted connection, only when you confirm a check. While you are signed in, the plugin also reads your plan, your credit balance and the current price. The plugin sends no analytics.");
     if (!c.account.signedIn) return;
-    new Setting(containerEl).setName("Contact support").setDesc(`Write to ${SUPPORT_EMAIL} and a person reads it. ${SUPPORT_REPLY_PROMISE} The plugin attaches nothing: what you write is all we see.`)
-      .addButton((b) => b.setButtonText("Help center").onClick(() => window.open(HELP_CENTER_URL)))
+    new Setting(containerEl).setName("Contact support").setDesc(`Write to ${SUPPORT_EMAIL} and a person reads it. ${SUPPORT_REPLY_PROMISE} The plugin adds only its version, in the subject.`)
+      .addButton((b) => b.setButtonText("Help center").onClick(() => window.open(HELP_CENTER_URL, "_external")))
       .addButton((b) => b.setButtonText("Email support").onClick(() => c.contactSupport()));
     new Setting(containerEl).setName("What Bunsho reads")
       .setDesc(c.data.source ? `\u201c${c.data.source.path === "/" ? "Whole vault" : c.data.source.path}\u201d. Any layout works: you confirm the order before a check.` : "Nothing chosen yet. Pick a folder or a note, in any layout.")
