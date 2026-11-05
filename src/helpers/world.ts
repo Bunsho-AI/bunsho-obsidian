@@ -21,6 +21,18 @@ export interface WorldRow {
   end: number;
   /** A changing state a later passage replaced, such as where someone was. */
   earlier: boolean;
+  /** The page's place in the story. */
+  order: number;
+}
+
+/** A changing state moving on between two chapters (desktop's Events). What lasts has none: a later different value is a finding. */
+export interface WorldChange {
+  key: string;
+  entityId: string;
+  entityName: string;
+  label: string;
+  from: WorldRow;
+  to: WorldRow;
 }
 
 export interface WorldEntity {
@@ -32,6 +44,7 @@ export interface WorldEntity {
   scenes: number;
   tier: WorldTier;
   rows: WorldRow[];
+  changes: WorldChange[];
 }
 
 const ENTITY_TYPE: Record<CastKind, WorldEntityType> = {
@@ -90,9 +103,30 @@ const firstAppearance = (a: CastMember, b: CastMember): number =>
   Math.min(...a.chapters, Infinity) - Math.min(...b.chapters, Infinity) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
 const personOnly = (dimension: string): boolean => dimension.startsWith("appearance:") || PERSON_ONLY.has(dimension);
 
+/**
+ * The groups the reads carry. The engine's cast leaves `group` records out (its stages/cast.ts), so they are read here, one
+ * group to a written name: joining two names is the identity judgment a string match must not make. A name the cast holds stays
+ * the cast's, so a group never changes who a fact is about.
+ */
+function groupsInReads(reads: readonly ChapterRead[], cast: readonly CastMember[]): CastMember[] {
+  const held = new Set(cast.flatMap(memberNames).map(nameKey));
+  const groups = new Map<string, CastMember>();
+  for (const read of reads) {
+    for (const record of read.cast) {
+      const key = nameKey(record.name);
+      if (record.kind !== "group" || !key || held.has(key)) continue;
+      const group = groups.get(key) ?? { id: `group:${key}`, name: record.name, kind: "group", names: [record.name], properNames: [record.name], aliases: [], chapters: [], roles: [], introduced: [] };
+      groups.set(key, { ...group,
+        chapters: group.chapters.includes(read.order) ? group.chapters : [...group.chapters, read.order],
+        names: [...group.names, ...record.names.map((n) => n.name).filter((name) => !held.has(nameKey(name)))] });
+    }
+  }
+  return [...groups.values()];
+}
+
 export function projectWorld(cast: readonly CastMember[], reads: readonly ChapterRead[]): WorldEntity[] {
-  const members = [...cast].sort(firstAppearance);
   const sorted = [...reads].sort((a, b) => a.order - b.order);
+  const members = [...cast, ...groupsInReads(sorted, cast)].sort(firstAppearance);
   const holders = new Map<string, CastMember[]>();
   for (const member of members) {
     for (const key of new Set(memberNames(member).map(nameKey).filter(Boolean))) holders.set(key, [...(holders.get(key) ?? []), member]);
@@ -133,7 +167,7 @@ export function projectWorld(cast: readonly CastMember[], reads: readonly Chapte
       const bucket = buckets.get(filed.key) ?? [];
       buckets.set(filed.key, bucket);
       const row: WorldRow = { key: `${filed.key}\u0000${read.pageId}\u0000${fact.span.start}`, label: filed.label, value: (fact.value as string).trim(), quote: fact.quote,
-        pageId: read.pageId, start: fact.span.start, end: fact.span.end, earlier: false };
+        pageId: read.pageId, start: fact.span.start, end: fact.span.end, earlier: false, order: read.order };
       const last = bucket[bucket.length - 1];
       // What lasts keeps its first value (a later different one is a finding, not the world). What changes records each change.
       if (!last) bucket.push(row);
@@ -144,10 +178,15 @@ export function projectWorld(cast: readonly CastMember[], reads: readonly Chapte
   return members.map((member) => {
     const scenes = new Set(member.chapters).size;
     const own = displayName(member);
+    const buckets = [...(rows.get(member.id)?.values() ?? [])];
     return {
       id: member.id, name: own, type: ENTITY_TYPE[member.kind], scenes, tier: tierOf(scenes),
       aliases: [...new Map(memberNames(member).filter((name) => nameKey(name) && nameKey(name) !== nameKey(own)).map((name) => [nameKey(name), name])).values()],
-      rows: [...(rows.get(member.id)?.values() ?? [])].flat(),
+      rows: buckets.flat(),
+      changes: buckets.flatMap((bucket) => bucket.slice(1).flatMap((to, i) => {
+        const from = bucket[i];
+        return from.pageId === to.pageId ? [] : [{ key: `${member.id}\u0000${to.key}`, entityId: member.id, entityName: own, label: to.label, from, to }];
+      })),
     };
   }).sort((a, b) => b.scenes - a.scenes || a.name.localeCompare(b.name));
 }
@@ -172,12 +211,24 @@ function fileUnder(fact: Fact, subject: CastMember, memberFor: (name: string | n
   return { key, label: VOCABULARY[key]?.label ?? human(key) };
 }
 
-export type WorldFilter = "people" | "places" | "things";
-const FILTER_TYPES: Record<WorldFilter, readonly WorldEntityType[]> = { people: ["character"], places: ["location"], things: ["object", "organization"] };
+export type WorldFilter = "people" | "places" | "things" | "groups" | "events";
+export type WorldEntityFilter = Exclude<WorldFilter, "events">;
+const FILTER_TYPES: Record<WorldEntityFilter, WorldEntityType> = { people: "character", places: "location", things: "object", groups: "organization" };
 
 /** Entities of a filter that match a search over names, labels and values. */
-export function filterWorld(entities: readonly WorldEntity[], filter: WorldFilter, search: string): WorldEntity[] {
+export function filterWorld(entities: readonly WorldEntity[], filter: WorldEntityFilter, search: string): WorldEntity[] {
   const query = search.trim().toLocaleLowerCase();
-  return entities.filter((entity) => FILTER_TYPES[filter].includes(entity.type)
+  return entities.filter((entity) => FILTER_TYPES[filter] === entity.type
     && (!query || [entity.name, ...entity.aliases, ...entity.rows.flatMap((r) => [r.label, r.value])].some((text) => text.toLocaleLowerCase().includes(query))));
+}
+
+/** Every change in the book, in story order. */
+export function worldChanges(entities: readonly WorldEntity[]): WorldChange[] {
+  return entities.flatMap((entity) => entity.changes).sort((a, b) => a.to.order - b.to.order || a.to.start - b.to.start);
+}
+
+/** Changes that match a search over who, what, and both values. */
+export function filterChanges(changes: readonly WorldChange[], search: string): WorldChange[] {
+  const query = search.trim().toLocaleLowerCase();
+  return changes.filter((change) => !query || [change.entityName, change.label, change.from.value, change.to.value].some((text) => text.toLocaleLowerCase().includes(query)));
 }

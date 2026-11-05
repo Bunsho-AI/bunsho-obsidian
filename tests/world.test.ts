@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterWorld, projectWorld } from "@/helpers/world";
+import { filterChanges, filterWorld, projectWorld, worldChanges } from "@/helpers/world";
 import type { CastMember, ChapterRead, Fact } from "@/lib/contract/pipelineV3.types";
 
 const member = (id: string, name: string, chapters: number[], extra: Partial<CastMember> = {}): CastMember => ({
@@ -104,13 +104,134 @@ describe("projectWorld", () => {
     expect(projectWorld(cast, []).map((e) => [e.name, e.tier])).toEqual([["Lead", "main"], ["Side", "supporting"], ["Minor", "mentioned"]]);
   });
 
-  it("maps cast kinds to people, places and things", () => {
+  it("maps cast kinds to people, places, things and groups, as the desktop's five filters", () => {
     const kinds = ["person", "place", "building", "vessel", "animal", "object", "group"] as const;
     const entities = projectWorld(kinds.map((kind) => member(kind, kind, [0], { kind })), []);
-    const names = (filter: "people" | "places" | "things") => filterWorld(entities, filter, "").map((e) => e.name).sort();
+    const names = (filter: "people" | "places" | "things" | "groups") => filterWorld(entities, filter, "").map((e) => e.name).sort();
     expect(names("people")).toEqual(["person"]);
     expect(names("places")).toEqual(["building", "place"]);
-    expect(names("things")).toEqual(["animal", "group", "object", "vessel"]);
+    expect(names("things")).toEqual(["animal", "object", "vessel"]);
+    expect(names("groups")).toEqual(["group"]);
+  });
+});
+
+describe("groups the reads carry", () => {
+  const guild = (order: number, name = "the Harbour Guild", names: ChapterRead["cast"][number]["names"] = [{ name, proper: true }]): ChapterRead["cast"][number] =>
+    ({ pageId: `p${order}`, order, name, kind: "group", names, role: "dock workers", introducedAliases: [] });
+  const groups = (cast: CastMember[], reads: ChapterRead[]) => filterWorld(projectWorld(cast, reads), "groups", "");
+
+  it("lists a group a chapter's reader saw, though the engine's cast leaves groups out", () => {
+    const [group] = groups([member("m", "Mira", [0])], [read(0, [], [guild(0)]), read(2, [], [guild(2)])]);
+    expect(group).toMatchObject({ name: "the Harbour Guild", type: "organization", scenes: 2, tier: "supporting", rows: [] });
+  });
+
+  it("shows nothing when no read carries a group, rather than inventing one", () => {
+    expect(groups([member("m", "Mira", [0])], [read(0, [fact(0, "Mira", "green", "appearance:eye_color")])])).toEqual([]);
+  });
+
+  it("is one group across chapters by its name, however it is written", () => {
+    const entities = groups([], [read(0, [], [guild(0, "The Harbour Guild")]), read(1, [], [guild(1, "the harbour guild")])]);
+    expect(entities).toHaveLength(1);
+    expect(entities[0].scenes).toBe(2);
+  });
+
+  it("never joins two groups because one's other name is the other's name: identity is not a string match", () => {
+    const longName = guild(0, "the Harbour Guild", [{ name: "the Harbour Guild", proper: true }, { name: "the Guild", proper: false }]);
+    expect(groups([], [read(0, [], [longName, guild(0, "the Guild")])]).map((e) => e.name).sort()).toEqual(["the Guild", "the Harbour Guild"]);
+  });
+
+  it("keeps the other names it was given, to show and to search", () => {
+    const entities = groups([], [read(0, [], [guild(0, "the Harbour Guild", [{ name: "the Harbour Guild", proper: true }, { name: "the dockers", proper: false }])])]);
+    expect(entities[0].aliases).toEqual(["the dockers"]);
+    expect(filterWorld(entities, "groups", "dockers")).toHaveLength(1);
+  });
+
+  it("files a fact under the group it names", () => {
+    const [group] = groups([], [read(0, [fact(0, "the Harbour Guild", "the old quay", "location")], [guild(0)])]);
+    expect(rowsOf(group)).toEqual(["Location: the old quay"]);
+  });
+
+  it("leaves a name the cast already holds to the cast: what was theirs stays theirs", () => {
+    const cast = [member("c", "The Carraways", [0], { kind: "person", names: ["The Carraways", "the family"] })];
+    const reads = [read(0, [fact(0, "The Carraways", "kind", "trait"), fact(0, "the family", "the old quay", "location")],
+      [guild(0, "The Carraways", [{ name: "The Carraways", proper: true }, { name: "the family", proper: false }, { name: "the clan", proper: false }])])];
+    const entities = projectWorld(cast, reads);
+    expect(entities.map((e) => [e.name, e.type])).toEqual([["The Carraways", "character"]]);
+    expect(rowsOf(entities[0])).toEqual(["Personality trait: kind", "Location: the old quay"]);
+  });
+
+  it("does not take a name from the cast through a group's other name", () => {
+    const cast = [member("m", "Mira", [0])];
+    const reads = [read(0, [fact(0, "Mira", "kind", "trait")], [guild(0, "the Guild", [{ name: "the Guild", proper: true }, { name: "Mira", proper: false }])])];
+    const entities = projectWorld(cast, reads);
+    expect(rowsOf(entities.find((e) => e.id === "m"))).toEqual(["Personality trait: kind"]);
+    expect(entities.find((e) => e.type === "organization")?.aliases).toEqual([]);
+  });
+
+  it("holds in any language", () => {
+    const [group] = groups([], [read(0, [], [guild(0, "港湾組合")])]);
+    expect(group.name).toBe("港湾組合");
+  });
+});
+
+describe("worldChanges", () => {
+  const changes = (reads: ChapterRead[], cast = [member("m", "Mira", [0, 1, 2])]) => worldChanges(projectWorld(cast, reads));
+  const moved = (order: number, value: string, extra: Partial<Fact> = {}) => read(order, [fact(order, "Mira", value, "location", extra)]);
+
+  it("gives each change of a changing state across chapters, with both passages", () => {
+    const [change, ...rest] = changes([moved(0, "the harbour"), moved(1, "the inn")]);
+    expect(rest).toEqual([]);
+    expect(change).toMatchObject({ entityId: "m", entityName: "Mira", label: "Location" });
+    expect(change.from).toMatchObject({ value: "the harbour", pageId: "p0", quote: "quote the harbour", start: 0, end: 5 });
+    expect(change.to).toMatchObject({ value: "the inn", pageId: "p1", quote: "quote the inn", start: 1, end: 6 });
+  });
+
+  it("has none for what lasts: a later different value is a finding, not a change", () => {
+    expect(changes([read(0, [fact(0, "Mira", "green", "appearance:eye_color")]), read(1, [fact(1, "Mira", "brown", "appearance:eye_color")])])).toEqual([]);
+  });
+
+  it("has none for the same value again, however it is written", () => {
+    expect(changes([moved(0, "the harbour"), moved(1, "The Harbour")])).toEqual([]);
+  });
+
+  it("leaves out what one chapter says twice: a change is across chapters, and never reads as a contradiction", () => {
+    const first = fact(0, "Mira", "the cellar", "location", { span: { start: 10, end: 20 } });
+    const second = fact(0, "Mira", "the garden", "location", { span: { start: 50, end: 60 } });
+    const list = changes([read(0, [first, second]), moved(1, "the inn")]);
+    expect(list.map((c) => [c.from.value, c.to.value])).toEqual([["the garden", "the inn"]]);
+  });
+
+  it("chains each change, and lists the book in story order across people", () => {
+    const cast = [member("m", "Mira", [0, 1, 2]), member("t", "Tobias", [0, 1])];
+    const reads = [read(2, [fact(2, "Mira", "the inn", "location")]), read(0, [fact(0, "Mira", "the harbour", "location"), fact(0, "Tobias", "the mill", "location")]),
+      read(1, [fact(1, "Mira", "the quay", "location"), fact(1, "Tobias", "the bridge", "location")])];
+    expect(changes(reads, cast).map((c) => `${c.entityName}: ${c.from.value} -> ${c.to.value}`).sort()).toEqual(["Mira: the harbour -> the quay", "Mira: the quay -> the inn", "Tobias: the mill -> the bridge"]);
+    expect(changes(reads, cast).map((c) => c.to.order)).toEqual([1, 1, 2]);
+  });
+
+  it("keeps a change per thing a person holds, not one list per dimension", () => {
+    const cast = [member("m", "Mira", [0, 1]), member("k", "The key", [0, 1], { kind: "object" }), member("r", "The ring", [0, 1], { kind: "object" })];
+    const hold = (order: number, value: string, counterpart: string) => fact(order, "Mira", value, "possession", { counterpart, span: { start: value.length + counterpart.length, end: 40 } });
+    const list = changes([read(0, [hold(0, "holds", "The key"), hold(0, "holds", "The ring")]), read(1, [hold(1, "lost", "The key")])], cast);
+    expect(list.map((c) => [c.label, c.from.value, c.to.value])).toEqual([["Possession of The key", "holds", "lost"]]);
+  });
+
+  it("holds in any language", () => {
+    const [change] = changes([moved(0, "港"), moved(1, "宿")]);
+    expect([change.from.value, change.to.value]).toEqual(["港", "宿"]);
+  });
+
+  it("gives every change its own key", () => {
+    const list = changes([moved(0, "a"), moved(1, "b"), moved(2, "c")]);
+    expect(new Set(list.map((c) => c.key)).size).toBe(2);
+  });
+});
+
+describe("filterChanges", () => {
+  const list = worldChanges(projectWorld([member("m", "Mira", [0, 1])], [read(0, [fact(0, "Mira", "the harbour", "location")]), read(1, [fact(1, "Mira", "the inn", "location")])]));
+  it("searches who, what, and both values", () => {
+    for (const query of ["mira", "LOCATION", "harbour", "inn", "  "]) expect(filterChanges(list, query)).toHaveLength(1);
+    expect(filterChanges(list, "zzz")).toEqual([]);
   });
 });
 
