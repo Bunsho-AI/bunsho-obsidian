@@ -2,6 +2,7 @@
 import { addIcon, Plugin, type WorkspaceLeaf } from "obsidian";
 import { BUNSHO_ICON_ID, BUNSHO_ICON_SVG } from "@/assets/logo";
 import { ContinuityController } from "@/controllers/ContinuityController";
+import { DirectorController } from "@/controllers/DirectorController";
 import { confirmCheck } from "@/pages/ConfirmCheckModal";
 import { confirmReplaceProject } from "@/pages/ConfirmReplaceProjectModal";
 import { pickIssue } from "@/pages/JumpPickerModal";
@@ -13,6 +14,7 @@ import type { PluginData } from "@/types";
 
 export default class BunshoPlugin extends Plugin {
   private controller!: ContinuityController;
+  private director!: DirectorController;
 
   async onload(): Promise<void> {
     addIcon(BUNSHO_ICON_ID, BUNSHO_ICON_SVG);
@@ -31,8 +33,9 @@ export default class BunshoPlugin extends Plugin {
       changed: () => this.renderViews(),
     });
     await this.controller.load();
+    this.director = new DirectorController(this.app, this.controller, () => this.renderViews());
 
-    this.registerView(VIEW_TYPE, (leaf: WorkspaceLeaf) => new ContinuityView(leaf, this.controller));
+    this.registerView(VIEW_TYPE, (leaf: WorkspaceLeaf) => new ContinuityView(leaf, this.controller, this.director));
     this.addRibbonIcon(BUNSHO_ICON_ID, "Bunsho: continuity", () => void this.openPanel());
     this.addCommand({ id: "open-panel", name: "Open continuity panel", callback: () => void this.openPanel() });
     this.addCommand({ id: "check-manuscript", name: "Check manuscript", callback: () => void this.controller.check() });

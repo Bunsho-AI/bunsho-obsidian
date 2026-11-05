@@ -89,6 +89,10 @@ export type Phase =
 export interface Account {
   signedIn: boolean;
   balance: number | null;
+  /** The engine's price list (GET /v1/credits), or null when it did not say. A price it did not give is never guessed. */
+  opCosts: Record<string, number> | null;
+  /** The active subscription's tier, or null: no active plan, or it could not be read. */
+  tier: string | null;
   /** The plan's name, or null when the engine could not say (never read as Free). */
   planName: string | null;
   health: PipelineV3Health | null;
@@ -100,4 +104,4 @@ export interface Account {
   lapsed: LapsedPlan | null;
 }
 
-export const SIGNED_OUT: Account = { signedIn: false, balance: null, planName: null, health: null, problem: null, project: "unknown", registeredName: null, lapsed: null };
+export const SIGNED_OUT: Account = { signedIn: false, balance: null, opCosts: null, tier: null, planName: null, health: null, problem: null, project: "unknown", registeredName: null, lapsed: null };

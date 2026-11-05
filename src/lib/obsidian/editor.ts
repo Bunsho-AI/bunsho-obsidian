@@ -36,3 +36,15 @@ export function activeNotePosition(app: App): { path: string; offset: number | n
   }
   return { path: file.path, offset: null };
 }
+
+/** The note's open editor text and cursor, as the writer has it: null when the note has no editor open. */
+export function noteCursor(app: App, path: string): { text: string; cursor: number } | null {
+  for (const leaf of app.workspace.getLeavesOfType("markdown")) {
+    const { view } = leaf;
+    if (view instanceof MarkdownView && view.file?.path === path) {
+      const cursor = view.editor.posToOffset(view.editor.getCursor());
+      return { text: view.editor.getValue().replace(/\r\n?/gu, "\n"), cursor };
+    }
+  }
+  return null;
+}

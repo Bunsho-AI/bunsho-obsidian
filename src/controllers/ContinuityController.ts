@@ -21,7 +21,7 @@ import { SUPPORT_EMAIL, supportMailto } from "@/helpers/support";
 import { projectWorld, type WorldEntity, type WorldRow } from "@/helpers/world";
 import { AUTH_CONFIG } from "@/lib/services/auth/authConfig";
 import { AuthError, TokenSource, uidOfToken } from "@/lib/services/auth/authService";
-import { claimStarterCredits, formPost, makeTransport, readBalance, type ConnectionOptions } from "@/lib/services/engine/engineService";
+import { claimStarterCredits, formPost, makeTransport, readCredits, type ConnectionOptions } from "@/lib/services/engine/engineService";
 import { readProjectState, registerProject } from "@/lib/services/project/projectService";
 import { canonCredits, MAX_PINS, runCanonReview, runReview, type ReviewOutcome, type ReviewRun } from "@/lib/services/review/reviewService";
 import { lapsedPlan } from "@/helpers/account";
@@ -31,6 +31,9 @@ import { addAlias, addEntity, addFact, editFact, pinFound, removeEntity, removeF
 import { writerPinDigest, writerPins } from "@/helpers/canon/pins";
 import { emptyCanon, MAX_DIMENSION_CHARS, nfcKey, type CanonTracking } from "@/helpers/canon/record";
 import { foundEntities, mergeRecord, type RecordEntity } from "@/helpers/canon/world";
+import { removeScenes } from "@/lib/obsidian/sceneStore";
+import { seedTracking, projectPipelineV3World, type EngineTracking } from "@/helpers/director/world";
+import { rankCast, type DirectorCastMember } from "@/helpers/director/cast";
 import { BROKEN, readCanon, removeCanon, writeCanon, type CanonBook } from "@/lib/obsidian/canonStore";
 import { SIGNED_OUT, type Account, type Phase, type PluginData, type ReviewAction, type Scan, type StoppedReview } from "@/types";
 import { formatNumber } from "@/utils/format";
@@ -138,11 +141,14 @@ export class ContinuityController {
   private canonWrites: Promise<unknown> = Promise.resolve();
   /** One pen write at a time. Each of them queues its file write on `canonWrites`, so these are two queues. */
   private penWrites: Promise<unknown> = Promise.resolve();
+  private trackingMemo: { canon: CanonTracking; world: WorldData | null; pages: unknown; review: ReviewOutcome | null; tracking: EngineTracking } | null = null;
   private recordMemo: { world: WorldEntity[] | null; tracking: CanonTracking; pages: unknown; entities: RecordEntity[] } | null = null;
   private readsMemo: { world: WorldData; policy: string; pages: unknown; complete: boolean } | null = null;
   private worldWrites: Promise<void> = Promise.resolve();
   /** Bumped when what the panel is about changes hands: another account, deleted data, another book. Whatever a view holds for the old one goes. */
   scopeGeneration = 0;
+  /** Bumped when the data here stops being what a running request was for: another account, or deleted data. A paid answer still arriving then goes nowhere near it. */
+  dataEpoch = 0;
   /** Bumped when the local session ends: a review still finishing then keeps nothing. */
   private sessionGen = 0;
   private projected: { world: WorldData; review: ReviewOutcome; orderKey: string; entities: WorldEntity[] } | null = null;
@@ -352,18 +358,18 @@ export class ContinuityController {
         // Before the balance read, so a writer who has only ever used Obsidian starts with the starter credits.
         if (!this.starterClaimed) this.starterClaimed = await claimStarterCredits(this.connection());
         const transport = this.transport();
-        const [health, balance, project] = await Promise.all([
-          new PipelineV3Client(transport).health(), readBalance(transport), readProjectState(transport, this.data.workspaceId),
+        const [health, { balance, opCosts }, project] = await Promise.all([
+          new PipelineV3Client(transport).health(), readCredits(transport), readProjectState(transport, this.data.workspaceId),
         ]);
         if (project.plan?.active && project.plan.tier && (project.plan.tier !== this.data.lastPlan?.tier || project.plan.renewsAt !== this.data.lastPlan?.renewsAt)) {
           this.data.lastPlan = { tier: project.plan.tier, renewsAt: project.plan.renewsAt };
           await this.save();
         }
-        next = { signedIn, health, balance, planName: project.planName, problem: null, project: project.state, registeredName: project.registeredName, lapsed: lapsedPlan(project.plan, this.data.lastPlan) };
+        next = { signedIn, health, balance, opCosts, tier: project.plan?.active ? project.plan.tier : null, planName: project.planName, problem: null, project: project.state, registeredName: project.registeredName, lapsed: lapsedPlan(project.plan, this.data.lastPlan) };
       } catch (error) {
         if (error instanceof AuthError && error.code === "signed_out") { this.endSession(); sessionOwnerStore(this.app).clear(); }
         next = error instanceof AuthError && error.code === "signed_out" ? { ...SIGNED_OUT, problem: error.message }
-          : { ...next, planName: this.account.planName, balance: this.account.balance, lapsed: this.account.lapsed, problem: error instanceof PipelineV3Error || error instanceof AuthError ? error.message : "Could not reach Bunsho. Check your connection." };
+          : { ...next, planName: this.account.planName, balance: this.account.balance, opCosts: this.account.opCosts, tier: this.account.tier, lapsed: this.account.lapsed, problem: error instanceof PipelineV3Error || error instanceof AuthError ? error.message : "Could not reach Bunsho. Check your connection." };
       }
     }
     if (seq !== this.accountSeq) return; // signed out (or refreshed again) while this was in flight
@@ -438,6 +444,7 @@ export class ContinuityController {
     if (swapped) {
       this.starterClaimed = false;
       this.scopeGeneration++;
+      this.dataEpoch++;
       if (this.phase.kind === "error") this.phase = { kind: "idle" };
       this.projected = null;
       this.recordMemo = null;
@@ -484,6 +491,7 @@ export class ContinuityController {
     this.canonUnreadable = false;
     this.recordMemo = null;
     this.scopeGeneration++;
+    this.dataEpoch++;
     const dir = this.host.dir;
     Object.assign(this.data, NO_ACCOUNT_STATE, { noteIds: {}, accountKey: null, rootAccount: null, otherAccounts: {} });
     this.scan = { status: "no_source" };
@@ -492,6 +500,7 @@ export class ContinuityController {
     await Promise.all([this.worldWrites, this.penWrites.catch(() => undefined), this.canonWrites.catch(() => undefined)]);
     await removeWorld(this.app, dir);
     await removeCanon(this.app, dir);
+    await removeScenes(this.app, dir);
     const accounts = `${dir}/accounts`;
     if (await this.app.vault.adapter.exists(accounts)) await this.app.vault.adapter.rmdir(accounts, true);
     await this.save();
@@ -943,6 +952,51 @@ export class ContinuityController {
     this.setPhase({ kind: "error", message: error instanceof Error ? error.message : "The check failed.", charged, ...(canRetry ? { action } : {}) });
     await this.refreshAccount();
   }
+
+  /** Where the signed-in account's own files are. */
+  accountFolder(): string { return this.accountFiles(); }
+  connectionOptions(): ConnectionOptions { return this.connection(); }
+  /** The notes as they are now. Throws when one cannot be read. */
+  readScan(): Promise<Scan> { return this.freshScan(); }
+  /** The note a note id is at now, by id, so a rename is followed. */
+  pathOfNote(noteId: string): string | null { return Object.entries(this.data.noteIds).find(([, id]) => id === noteId)?.[0] ?? null; }
+
+  /** The plan item under the writer's cursor. Only a line on the plan: a scene goes into the book. */
+  activeChapter(): PlannedItem | null {
+    const { scan } = this;
+    if (scan.status !== "ready") return null;
+    const position = activeNotePosition(this.app);
+    const noteId = position ? this.data.noteIds[position.path] : undefined;
+    return position && noteId ? itemAtOffset(scan.items, noteId, position.offset) : null;
+  }
+
+  /** What Check chapter costs for this line of the plan, when it can run. */
+  chapterQuote(itemId: string): number | null {
+    const { scan } = this;
+    if (!this.chapterChecksOpen() || scan.status !== "ready" || !scan.items.some((item) => item.id === itemId && item.included)) return null;
+    return this.priceFor(scan.itemChars[itemId] ?? 0, this.account.health);
+  }
+
+  /**
+   * What a Director request carries: what the writer declared, with what the checks of this book read projected over it. Built when asked and never stored, so canon.json stays the
+   * writer's alone, and a book with neither is still a complete bundle.
+   */
+  directorTracking(): EngineTracking {
+    const canon = this.canonTracking();
+    const { world, scan } = this;
+    const pages = scan.status === "ready" ? scan.pages : null;
+    const review = this.currentReview();
+    if (this.trackingMemo?.canon === canon && this.trackingMemo.world === world && this.trackingMemo.pages === pages && this.trackingMemo.review === review) return this.trackingMemo.tracking;
+    const seed = seedTracking(canon);
+    const order = new Map(pages?.map((page) => [page.pageId, page.order]));
+    const reads = world && review ? worldReads(world.reads, review.ledger).filter((read) => order.has(read.pageId)) : [];
+    const tracking = world && reads.length > 0 ? projectPipelineV3World({ tracking: seed, cast: world.cast, reads, pageOrder: order }) : seed;
+    this.trackingMemo = { canon, world, pages, review, tracking };
+    return tracking;
+  }
+
+  /** Who the direction box's @ list offers. */
+  directorCast(): DirectorCastMember[] { return rankCast(this.directorTracking().entities.entities); }
 
   /** The review that failed, at what it costs now. Null when it no longer can run. */
   retryQuote(): number | null {

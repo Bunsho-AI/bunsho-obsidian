@@ -42,10 +42,11 @@ function dimensionSubject(dimension: string): string | null {
 }
 
 /** The engine requires a page source's quote. A promoted fact can have come from a page without one. */
-const wireSource = <T extends CanonSource>(source: T): T => {
-  if (isWriterSource(source)) return source.from ? { ...source, from: wireSource(source.from) } : source;
-  return { ...source, quote: (source as PageSource).quote?.slice(0, MAX_QUOTE_CHARS) ?? "" };
-};
+function wirePage(source: PageSource): PageSource { return { ...source, quote: source.quote?.slice(0, MAX_QUOTE_CHARS) ?? "" }; }
+function wireSource(source: CanonSource): CanonSource {
+  if (isWriterSource(source)) return source.from ? { ...source, from: wirePage(source.from) } : source;
+  return wirePage(source);
+}
 
 /** What the writer declared, in the bundle's shape. The pen's own records, untouched otherwise. */
 export function seedTracking(canon: CanonTracking): EngineTracking {
@@ -196,10 +197,10 @@ export function projectPipelineV3World(input: PipelineV3WorldInput): EngineTrack
         const proposition = clip(fact.value!, MAX_PROPOSITION_CHARS);
         const propositionKey = propositionKeyOf(proposition, MAX_PROPOSITION_KEY_CHARS);
         const knower = `${entity.entityId}\u0000${propositionKey}`;
-        const knowledgeId = hashId("kn", read.pageId, read.rev, entity.entityId, fact.dimension!, propositionKey, fact.quote);
+        const knowledgeId = hashId("kn", read.pageId, read.rev, entity.entityId, fact.dimension, propositionKey, fact.quote);
         if (!propositionKey || writerKnowledge.has(knower) || knownKeys.has(`${knower}\u0000${fact.dimension}`) || keptIds.has(knowledgeId)) continue;
         knownKeys.add(`${knower}\u0000${fact.dimension}`);
-        knowledge.push({ knowledgeId, entityId: entity.entityId, proposition, propositionKey, polarity: fact.dimension!, learnedAt: source(read, fact.quote) });
+        knowledge.push({ knowledgeId, entityId: entity.entityId, proposition, propositionKey, polarity: fact.dimension, learnedAt: source(read, fact.quote) });
         continue;
       }
       const dimension = dimensionFor(fact, entity, (name) => resolve(name, read));

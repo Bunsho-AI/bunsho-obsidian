@@ -536,3 +536,137 @@ button.bunsho-identity-new { color: var(--bunsho-text-2); border: 1px solid var(
 .bunsho-compare-more { margin-top: 4px; }
 .bunsho-canon-card-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 8px; margin-top: 10px; }
 .bunsho-rail-canon .bunsho-world-fact { margin-top: 4px; }
+
+/* ============================== Director ============================== */
+.bunsho-director { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; }
+.bunsho-small { font-family: var(--bunsho-desk-ui); font-size: 11px; line-height: 1.5; color: var(--bunsho-text-3); }
+.bunsho-director-line { font-family: var(--bunsho-desk-ui); font-size: 13px; line-height: 1.55; color: var(--bunsho-text-2); overflow-wrap: anywhere; }
+.bunsho-director-strong { color: var(--bunsho-text-1); }
+.bunsho-panel button.bunsho-pen { all: unset; box-sizing: border-box; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 7px; min-height: 28px; font-family: var(--bunsho-desk-ui); font-size: 11px; font-weight: 500; color: var(--bunsho-text-2); cursor: pointer; }
+.bunsho-panel button.bunsho-pen.is-quiet { color: var(--bunsho-text-3); }
+.bunsho-panel button.bunsho-pen.is-accent { color: var(--bunsho-accent-text); }
+.bunsho-panel button.bunsho-pen:hover:not(:disabled) { color: var(--bunsho-text-1); }
+.bunsho-panel button.bunsho-pen:focus-visible, .bunsho-panel button.bunsho-outlined:focus-visible { outline: 2px solid var(--bunsho-accent); outline-offset: 1px; border-radius: 3px; }
+.bunsho-panel button.bunsho-pen:disabled { cursor: default; opacity: 0.55; }
+.bunsho-pen-icon { display: inline-flex; }
+.bunsho-pen-icon svg { width: 11px; height: 11px; }
+.bunsho-panel button.bunsho-outlined { all: unset; box-sizing: border-box; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 7px; min-height: 28px; padding: 3px 10px; border: 1px solid var(--bunsho-accent); border-radius: 4px; font-family: var(--bunsho-desk-ui); font-size: 11px; font-weight: 500; color: var(--bunsho-accent-text); cursor: pointer; }
+.bunsho-panel button.bunsho-outlined:disabled { border-color: var(--bunsho-border); color: var(--bunsho-text-3); cursor: default; }
+.bunsho-priced { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 7px; height: auto; min-height: 28px; white-space: normal; }
+.bunsho-fact.is-on-fill { color: var(--bunsho-on-accent); }
+.bunsho-panel button.bunsho-fill:disabled { opacity: 0.5; cursor: default; }
+.is-reading { animation: bunsho-reading 1.6s ease-in-out infinite; }
+@keyframes bunsho-reading { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .is-reading { animation: none; } }
+
+.bunsho-direction { position: relative; }
+.bunsho-direction-box { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; background: var(--bunsho-card); border: 1px solid var(--bunsho-border); border-radius: 8px; box-shadow: var(--bunsho-rest); }
+.bunsho-direction-box:focus-within { border-color: var(--bunsho-accent); }
+.bunsho-panel textarea.bunsho-pen-area { width: 100%; box-sizing: border-box; resize: none; font-family: var(--bunsho-desk-ui); font-size: 13px; line-height: 1.55; color: var(--bunsho-text-1); }
+.bunsho-panel textarea.bunsho-direction-field { min-height: 62px; padding: 0; background: transparent; border: none; box-shadow: none; outline: none; }
+.bunsho-panel textarea.bunsho-beat-field { font-family: var(--bunsho-desk-quote); background: var(--background-primary); border: 1px solid var(--bunsho-accent); border-radius: 4px; padding: 6px 8px; box-shadow: none; }
+.bunsho-direction-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 10px; padding-top: 8px; border-top: 1px solid var(--bunsho-border-hair); }
+.bunsho-direction-foot .bunsho-anchor { flex: 1 1 150px; min-width: 0; }
+.bunsho-direction-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.bunsho-direction-well { display: flex; flex-direction: column; gap: 4px; padding: 9px 11px; background: var(--bunsho-card-soft); border: 1px solid var(--bunsho-border-hair); border-radius: 4px; }
+.bunsho-direction-well-head { display: flex; align-items: center; justify-content: space-between; min-height: 20px; }
+.bunsho-earlier-label { font-family: var(--bunsho-desk-ui); font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--bunsho-text-3); }
+.bunsho-mention-list { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 30; padding: 4px; background: var(--bunsho-card); border: 1px solid var(--bunsho-border); border-radius: 8px; box-shadow: var(--shadow-s); }
+.bunsho-mention-head { padding: 4px 8px; }
+.bunsho-panel button.bunsho-mention-row { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border-radius: 3px; font-family: var(--bunsho-desk-ui); font-size: 13px; color: var(--bunsho-text-1); cursor: pointer; }
+.bunsho-panel button.bunsho-mention-row.is-active, .bunsho-panel button.bunsho-mention-row:hover { background: var(--bunsho-card-soft); }
+.bunsho-mention-icon { display: inline-flex; color: var(--bunsho-text-3); }
+.bunsho-mention-icon svg { width: 13px; height: 13px; }
+.bunsho-mention-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+.bunsho-anchor { position: relative; min-width: 0; }
+.bunsho-anchor-line { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 8px; }
+.bunsho-anchor-text { min-width: 0; font-family: var(--bunsho-desk-ui); font-size: 13px; line-height: 1.5; color: var(--bunsho-text-2); overflow-wrap: anywhere; }
+.bunsho-anchor-strong { color: var(--bunsho-text-1); }
+.bunsho-panel button.bunsho-anchor-control { all: unset; color: var(--bunsho-text-1); box-shadow: inset 0 -1px 0 var(--bunsho-border); cursor: pointer; }
+.bunsho-panel button.bunsho-anchor-control:focus-visible { outline: 2px solid var(--bunsho-accent); outline-offset: 1px; }
+.bunsho-anchor-trailing { flex: none; }
+.bunsho-anchor-options { display: flex; flex-direction: column; margin-top: 4px; padding: 4px; background: var(--bunsho-card); border: 1px solid var(--bunsho-border); border-radius: 8px; }
+.bunsho-panel button.bunsho-anchor-option { all: unset; box-sizing: border-box; padding: 6px 8px; min-height: 28px; border-radius: 3px; font-family: var(--bunsho-desk-ui); font-size: 13px; color: var(--bunsho-text-1); cursor: pointer; }
+.bunsho-panel button.bunsho-anchor-option.is-active, .bunsho-panel button.bunsho-anchor-option:hover { background: var(--bunsho-card-soft); }
+
+.bunsho-scene-card, .bunsho-scene-frame { background: var(--bunsho-card); border: 1px solid var(--bunsho-border); border-radius: 4px; box-shadow: var(--bunsho-rest); }
+.bunsho-scene-head { padding: 12px 14px; }
+.bunsho-scene-previous { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 8px; margin-bottom: 4px; }
+.bunsho-scene-note { flex: 1 1 100px; min-width: 0; overflow-wrap: anywhere; }
+.bunsho-scene-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.bunsho-scene-title { margin: 0; font-family: var(--bunsho-desk-quote); font-size: 18px; line-height: 1.3; font-weight: 500; color: var(--bunsho-text-1); overflow-wrap: anywhere; }
+.bunsho-scene-description { margin: 6px 0 0; font-family: var(--bunsho-desk-quote); font-size: 13.5px; line-height: 1.7; color: var(--bunsho-text-2); overflow-wrap: anywhere; }
+.bunsho-scene-beats { display: flex; flex-direction: column; gap: 1px; padding: 6px; border-top: 1px solid var(--bunsho-border-hair); }
+.bunsho-beat { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 6px; padding: 7px 6px; border-radius: 4px; }
+.bunsho-beat.is-compact { padding: 4px 6px; }
+.bunsho-beat.is-lit { background: var(--bunsho-card-soft); box-shadow: inset 2px 0 0 var(--bunsho-accent); }
+.bunsho-beat.is-writing { animation: bunsho-reading 1.6s ease-in-out infinite; }
+.bunsho-beat-side { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.bunsho-beat-n { padding-top: 3px; font-variant-numeric: tabular-nums; }
+.bunsho-beat-n.is-flagged { color: var(--bunsho-danger); font-weight: 700; }
+.bunsho-panel button.bunsho-beat-grip { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 24px; color: var(--bunsho-text-3); cursor: grab; border-radius: 3px; }
+.bunsho-panel button.bunsho-beat-grip:hover { background: var(--bunsho-card-soft); color: var(--bunsho-text-1); }
+.bunsho-panel button.bunsho-beat-grip:focus-visible { outline: 2px solid var(--bunsho-accent); }
+.bunsho-beat-grip svg { width: 14px; height: 14px; }
+.bunsho-beat-body { min-width: 0; }
+.bunsho-beat-line { font-family: var(--bunsho-desk-quote); font-size: 14px; line-height: 1.6; color: var(--bunsho-text-1); overflow-wrap: anywhere; }
+.bunsho-beat.is-compact .bunsho-beat-line { color: var(--bunsho-text-2); font-size: 13px; }
+.bunsho-beat-line.is-editable { cursor: text; }
+.bunsho-beat-line:focus-visible { outline: 2px solid var(--bunsho-accent); border-radius: 2px; }
+.bunsho-beat-change { margin-top: 2px; font-family: var(--bunsho-desk-quote); font-style: italic; font-size: 12.5px; line-height: 1.55; color: var(--bunsho-text-3); overflow-wrap: anywhere; }
+.bunsho-beat-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 12px; margin-top: 2px; }
+.bunsho-beat-removed { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; padding: 6px 8px 6px 34px; min-height: 28px; }
+.bunsho-beat-removed-line { flex: 1 1 100px; min-width: 0; font-family: var(--bunsho-desk-ui); font-size: 11px; color: var(--bunsho-text-3); overflow-wrap: anywhere; }
+.bunsho-beat-drop { height: 2px; margin: 1px 8px 1px 30px; background: var(--bunsho-accent); }
+.bunsho-beat-slot { padding: 2px 6px 6px 34px; }
+.bunsho-beat-add { padding: 2px 8px 4px 34px; }
+.bunsho-note-slot { display: flex; flex-direction: column; gap: 8px; padding: 9px 11px; background: var(--bunsho-card-soft); border: 1px solid var(--bunsho-border-hair); border-radius: 4px; }
+.bunsho-note-slot-title { font-family: var(--bunsho-desk-ui); font-size: 13px; color: var(--bunsho-text-2); }
+.bunsho-note-slot-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.bunsho-note-slot .bunsho-pen-field { width: 100%; box-sizing: border-box; }
+.bunsho-record-line { display: flex; flex-direction: column; gap: 6px; margin: 0 12px 10px; padding: 9px 11px; border-radius: 4px; background: var(--bunsho-card-soft); border: 1px solid var(--bunsho-border-hair); }
+.bunsho-record-line.is-canon { background: var(--bunsho-card); border-color: var(--bunsho-border); box-shadow: inset 2px 0 0 var(--bunsho-danger); }
+.bunsho-record-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.bunsho-record-pill { align-self: flex-start; font-family: var(--bunsho-desk-ui); font-size: 9.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--bunsho-text-3); }
+.bunsho-record-line.is-canon .bunsho-record-pill, .bunsho-director-credits .bunsho-record-pill { padding: 2px 5px; border-radius: 3px; background: var(--bunsho-danger-fill); color: var(--bunsho-danger-on); }
+.bunsho-record-text { font-family: var(--bunsho-desk-ui); font-size: 13px; line-height: 1.55; color: var(--bunsho-text-2); overflow-wrap: anywhere; }
+.bunsho-scene-foot { display: flex; flex-direction: column; gap: 9px; padding: 10px 14px 12px; border-top: 1px solid var(--bunsho-border-hair); background: var(--bunsho-card); border-radius: 0 0 4px 4px; }
+.bunsho-scene-foot.is-long { position: sticky; bottom: 0; z-index: 1; box-shadow: 0 -6px 14px rgba(31, 26, 18, 0.05); }
+.bunsho-scene-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
+.bunsho-director-credits { display: flex; flex-direction: column; gap: 7px; padding: 12px 13px; background: var(--bunsho-card); border: 1px solid var(--bunsho-border); border-radius: 4px; box-shadow: inset 2px 0 0 var(--bunsho-danger); }
+.bunsho-director-credits-line { font-family: var(--bunsho-desk-ui); font-size: 13px; font-weight: 500; color: var(--bunsho-text-1); }
+.bunsho-panel button.bunsho-scene-folded { all: unset; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 10px 14px; cursor: pointer; }
+.bunsho-panel button.bunsho-scene-folded:focus-visible, .bunsho-panel button.bunsho-scene-row:focus-visible { outline: 2px solid var(--bunsho-accent); outline-offset: -2px; }
+.bunsho-panel button.bunsho-scene-row { all: unset; box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 10px; width: 100%; min-height: 28px; padding: 8px 10px; border-radius: 4px; cursor: pointer; }
+.bunsho-panel button.bunsho-scene-row.is-framed { padding: 10px 14px; }
+.bunsho-panel button.bunsho-scene-row:disabled { cursor: default; }
+.bunsho-panel button.bunsho-scene-row:hover:not(:disabled):not(.is-framed) { background: var(--bunsho-card-soft); }
+.bunsho-scene-row-title { flex: 1 1 120px; min-width: 0; font-family: var(--bunsho-desk-quote); font-size: 13.5px; color: var(--bunsho-text-1); overflow-wrap: anywhere; }
+.bunsho-scene-row-title.is-strong { font-weight: 500; }
+.bunsho-scene-row.is-framed .bunsho-scene-row-title { font-weight: 500; }
+.bunsho-scene-row-meta { flex: none; }
+.bunsho-scene-check { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px 12px; border-top: 1px solid var(--bunsho-border-hair); }
+.bunsho-scene-check.is-checking { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+.bunsho-earlier-head { display: flex; align-items: center; gap: 7px; padding: 9px 6px 5px; }
+.bunsho-earlier-rule { flex: 1; height: 1px; background: var(--bunsho-border-hair); }
+.bunsho-draft-sheet { display: flex; flex-direction: column; gap: 12px; padding: 18px 14px 20px 30px; background: var(--background-primary); border-radius: 3px; box-shadow: var(--shadow-s); font-family: var(--bunsho-desk-quote); font-size: 14px; line-height: 1.7; color: var(--bunsho-text-1); user-select: text; overflow-wrap: anywhere; }
+.bunsho-draft-passage { position: relative; }
+.bunsho-draft-passage p { margin: 0 0 12px; }
+.bunsho-draft-passage p:last-of-type { margin-bottom: 4px; }
+.bunsho-draft-n { position: absolute; left: -20px; top: 4px; }
+.bunsho-draft-foot { position: sticky; bottom: 0; z-index: 2; display: flex; flex-direction: column; gap: 8px; margin: 0 -2px; padding: 10px 2px 12px; background: var(--background-secondary); border-top: 1px solid var(--bunsho-border); }
+.bunsho-draft-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.bunsho-card-shape-head { display: flex; flex-direction: column; gap: 9px; padding: 14px 16px 12px; }
+.bunsho-card-shape-bar { display: block; height: 7px; border-radius: 2px; background: var(--bunsho-border-hair); }
+.bunsho-card-shape-bar.is-title { width: 58%; height: 12px; background: var(--bunsho-border); }
+.bunsho-card-shape-bar.is-long { width: 92%; }
+.bunsho-card-shape-bar.is-mid { width: 74%; }
+.bunsho-card-shape-rows { display: flex; flex-direction: column; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--bunsho-border-hair); }
+.bunsho-card-shape-row { display: flex; align-items: center; gap: 10px; }
+.bunsho-card-shape-rule { flex: 1; height: 1px; background: var(--bunsho-border); }
+.bunsho-director-upsell { display: flex; flex-direction: column; gap: 12px; padding-top: 16px; }
+.bunsho-director-upsell p { margin: 0; }
+.bunsho-director-upsell-sheet { padding: 16px 18px; background: var(--background-primary); border-radius: 3px; box-shadow: var(--shadow-s); }
+.bunsho-director-upsell-line { margin-top: 8px; font-family: var(--bunsho-desk-quote); font-size: 15px; line-height: 1.8; color: var(--bunsho-text-3); }
+.bunsho-draft-passage.is-lit { box-shadow: inset 2px 0 0 var(--bunsho-accent); background: var(--bunsho-card-soft); }

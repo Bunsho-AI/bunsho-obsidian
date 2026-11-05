@@ -32,6 +32,7 @@ export const NOTE_SLOT_COPY = {
 export type NoteSlotKind = keyof typeof NOTE_SLOT_COPY;
 
 export const STATUS_WORDS: Record<SceneRowStatus, string> = { kept: "kept", unwritten: "not written", drafted: "not kept" };
+export const ADD_BEAT = "+ Add a beat";
 export const NO_CHAPTER = "Open a chapter first: the scene goes into the chapter you are in.";
 export const QUILL_AI_UPSELL = {
   label: "Storyteller needed",
@@ -94,7 +95,7 @@ export interface SceneLayout {
  * scene, only while it is unkept. After Keep the box opens empty; an older unwritten scene stays in the list rather
  * than jumping onto the card.
  */
-export function layoutScenes(scenes: readonly DirectorSceneRecord[], focus: string | "none" | null): SceneLayout {
+export function layoutScenes(scenes: readonly DirectorSceneRecord[], focus: string | null): SceneLayout {
   const opened = focus && focus !== "none" ? (scenes.find((s) => s.sceneId === focus) ?? null) : null;
   const newest = scenes[0];
   const current = opened ?? (focus === null && newest && !isKeptScene(newest) ? newest : null);

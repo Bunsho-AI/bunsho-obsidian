@@ -62,6 +62,7 @@ describe("what became of a finding", () => {
 describe("the panel's tabs", () => {
   it("keep the desktop's names, icons and order", () => {
     expect(PANEL_TABS).toEqual([
+      { id: "director", label: "Director", icon: "clapperboard" },
       { id: "world", label: "World", icon: "globe" },
       { id: "continuity", label: "Continuity", icon: "check-circle-2" },
     ]);
