@@ -42,7 +42,7 @@
   min-height: 34px; padding: 6px 12px; box-sizing: border-box; border-bottom: 1px solid var(--background-modifier-border);
 }
 /* In a narrow sidebar the action wraps under the fact instead of cutting it off. */
-.bunsho-status-text { flex: 0 1 auto; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bunsho-status-text { flex: 0 1 auto; max-width: 100%; overflow-wrap: anywhere; }
 .bunsho-status-text.is-reading { animation: bunsho-reading 1.4s ease-in-out infinite; }
 @keyframes bunsho-reading { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 .bunsho-status-action { flex: none; margin-left: auto; }
@@ -62,7 +62,7 @@ button.bunsho-text-action:focus-visible, .bunsho-passage:focus-visible { outline
 /* The filled button (the priced check): gold is a fill */
 button.bunsho-fill {
   background: var(--bunsho-accent); color: var(--bunsho-on-accent); border: none; box-shadow: none;
-  font-weight: 600; padding: 6px 14px; border-radius: 4px; cursor: pointer;
+  font-weight: 600; padding: 6px 14px; border-radius: 4px; cursor: pointer; height: auto; white-space: normal;
 }
 button.bunsho-fill:hover { filter: brightness(0.95); }
 button.bunsho-quiet { font-size: var(--font-ui-small); }
@@ -244,6 +244,113 @@ button.bunsho-world-pill {
 button.bunsho-world-pill.is-more { color: var(--text-muted); }
 button.bunsho-world-pill:hover { border-color: var(--bunsho-accent); }
 button.bunsho-world-pill:focus-visible { outline: 2px solid var(--bunsho-accent); outline-offset: 2px; }
+
+/* The check loop. A finding's kind: hue text on a tint of itself, the desktop's spectrum tokens. */
+.bunsho-picker {
+  --bunsho-desk-ui: 'Bunsho IBM Plex Sans', var(--font-interface), system-ui, sans-serif;
+  --bunsho-desk-fact: 'Bunsho Courier Prime', var(--font-monospace), ui-monospace, monospace;
+  --bunsho-font-fact: var(--bunsho-desk-fact);
+}
+.bunsho-panel, .bunsho-picker {
+  --bunsho-spectrum-factual: #9e3832; --bunsho-spectrum-temporal: #755902; --bunsho-spectrum-character-arc: #6940a5;
+  --bunsho-spectrum-world: #0b6e99; --bunsho-spectrum-voice: #226539; --bunsho-spectrum-plot: #454a96;
+}
+.theme-dark .bunsho-panel, .theme-dark .bunsho-picker {
+  --bunsho-spectrum-factual: #e08a84; --bunsho-spectrum-temporal: #dfa803; --bunsho-spectrum-character-arc: #c9a3f0;
+  --bunsho-spectrum-world: #5fb8e6; --bunsho-spectrum-voice: #5ecb8a; --bunsho-spectrum-plot: #a3abf0;
+}
+.bunsho-pill[data-spectrum="factual"], .bunsho-chip[data-spectrum="factual"] { --bunsho-hue: var(--bunsho-spectrum-factual); }
+.bunsho-pill[data-spectrum="temporal"], .bunsho-chip[data-spectrum="temporal"] { --bunsho-hue: var(--bunsho-spectrum-temporal); }
+.bunsho-pill[data-spectrum="character_arc"], .bunsho-chip[data-spectrum="character_arc"] { --bunsho-hue: var(--bunsho-spectrum-character-arc); }
+.bunsho-pill[data-spectrum="world"], .bunsho-chip[data-spectrum="world"] { --bunsho-hue: var(--bunsho-spectrum-world); }
+.bunsho-pill[data-spectrum="voice"], .bunsho-chip[data-spectrum="voice"] { --bunsho-hue: var(--bunsho-spectrum-voice); }
+.bunsho-pill[data-spectrum="plot"], .bunsho-chip[data-spectrum="plot"] { --bunsho-hue: var(--bunsho-spectrum-plot); }
+.bunsho-pill-icon { display: inline-flex; flex: none; }
+.bunsho-pill-icon svg { width: 10px; height: 10px; }
+.bunsho-pill {
+  display: inline-flex; align-items: center; flex: none; gap: 5px; padding: 3px 9px; border-radius: 999px; white-space: nowrap;
+  font-family: var(--bunsho-desk-ui); font-size: 9.5px; font-weight: 500;
+  color: var(--bunsho-hue); background: color-mix(in srgb, var(--bunsho-hue) 12%, transparent);
+}
+.bunsho-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 12px; }
+button.bunsho-chip {
+  all: unset; display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; box-sizing: border-box; border-radius: 999px; cursor: pointer;
+  border: 1px solid transparent; font-family: var(--bunsho-desk-ui); font-size: 11px; font-weight: 500;
+  color: var(--bunsho-hue); background: color-mix(in srgb, var(--bunsho-hue) 12%, transparent);
+}
+button.bunsho-chip.is-active { background: var(--bunsho-card); border-color: var(--bunsho-border-strong); box-shadow: var(--bunsho-rest); }
+.bunsho-chip-count { font-family: var(--bunsho-desk-fact); }
+button.bunsho-chip:focus-visible, button.bunsho-picker-row:focus-visible, button.bunsho-chapter-trigger:focus-visible, button.bunsho-chapter-cancel:focus-visible,
+button.bunsho-retry:focus-visible, button.bunsho-recheck:focus-visible, button.bunsho-fill:focus-visible { outline: 2px solid var(--bunsho-accent); outline-offset: 2px; }
+.bunsho-filter-none { margin: 24px 0; text-align: center; font-family: var(--bunsho-desk-ui); font-size: 13px; color: var(--text-muted); }
+
+/* Changed chapters: one row, the price on its button. */
+.bunsho-changed { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 8px; padding-bottom: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--background-modifier-border); }
+.bunsho-changed-text { flex: 1 1 140px; min-width: 0; margin: 0; font-family: var(--bunsho-desk-ui); font-size: 11px; color: var(--text-muted); }
+button.bunsho-fill.is-small { padding: 4px 9px; font-family: var(--bunsho-desk-ui); font-size: 11px; font-weight: 500; border-radius: 5px; height: auto; white-space: normal; text-align: left; }
+
+/* Check chapter and Jump to issue */
+.bunsho-loop-tools { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+/* The confirm takes a line of its own under the row, so the row's other action stays where it was. */
+.bunsho-chapter-control { display: contents; }
+.bunsho-chapter-confirm { order: 2; flex: 0 1 100%; }
+button.bunsho-chapter-trigger {
+  all: unset; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; box-sizing: border-box; border-radius: 4px; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--bunsho-accent) 45%, transparent); background: color-mix(in srgb, var(--bunsho-accent) 12%, transparent);
+  font-family: var(--bunsho-desk-ui); font-size: 11px; font-weight: 500; color: var(--bunsho-accent-text);
+}
+button.bunsho-chapter-trigger:hover { background: color-mix(in srgb, var(--bunsho-accent) 20%, transparent); }
+.bunsho-chapter-trigger .bunsho-pill-icon svg { width: 12px; height: 12px; }
+.bunsho-chapter-confirm {
+  padding: 11px 12px; max-width: 256px; box-sizing: border-box; border: 1px solid var(--bunsho-border-strong); border-radius: 6px;
+  background: var(--bunsho-card); box-shadow: var(--bunsho-rest); font-family: var(--bunsho-desk-ui);
+}
+.bunsho-chapter-line { margin: 0; font-size: 13px; color: var(--bunsho-text-1); }
+.bunsho-chapter-body { margin: 6px 0; font-size: 11px; line-height: 1.5; color: var(--bunsho-text-2); }
+.bunsho-chapter-confirm .bunsho-chapter-name { display: block; overflow-wrap: anywhere; font-family: var(--bunsho-desk-fact); color: var(--bunsho-text-3); }
+.bunsho-chapter-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 10px; }
+button.bunsho-chapter-cancel { all: unset; height: 24px; padding: 0 8px; border-radius: 4px; cursor: pointer; font-size: 11px; color: var(--bunsho-text-2); }
+button.bunsho-chapter-cancel:hover { background: var(--bunsho-card-soft); }
+
+/* Check if fixed: the one filled control on the Resolve screen */
+button.bunsho-recheck {
+  all: unset; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; padding: 6px 12px; border-radius: 4px;
+  background: var(--bunsho-accent); color: var(--bunsho-on-accent); font-family: var(--bunsho-desk-ui); font-size: 11px; font-weight: 500;
+}
+button.bunsho-recheck:disabled { opacity: 0.5; cursor: default; }
+.bunsho-recheck-price { font-family: var(--bunsho-desk-fact); opacity: 0.75; }
+.bunsho-feedback {
+  margin-bottom: 10px; padding: 9px 11px; border: 1px solid var(--background-modifier-border); border-left: 2px solid var(--text-success);
+  border-radius: 4px; overflow-wrap: anywhere; font-family: var(--bunsho-desk-ui); font-size: 13px; line-height: 1.45; color: var(--text-normal); background: var(--background-primary);
+}
+.bunsho-feedback.is-danger { border-left-color: var(--bunsho-danger); }
+.bunsho-resolver-jump { margin: -4px 0 10px; }
+
+/* Stopped reviews */
+.bunsho-alert-label {
+  display: inline-block; margin-bottom: 6px; padding: 2px 6px; border-radius: 3px; font-family: var(--bunsho-desk-ui); font-size: 9.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--bunsho-danger-on); background: var(--bunsho-danger-fill);
+}
+button.bunsho-retry {
+  all: unset; padding: 4px 10px; border: 1px solid var(--bunsho-border-strong); border-radius: 5px; cursor: pointer;
+  font-family: var(--bunsho-desk-ui); font-size: 11px; font-weight: 500; color: var(--bunsho-accent-text);
+}
+
+/* Jump to issue */
+.bunsho-picker-modal .modal-content { padding: 0; }
+.bunsho-picker { font-family: var(--bunsho-desk-ui); }
+.bunsho-picker-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--background-modifier-border); color: var(--text-muted); }
+.bunsho-picker-head .bunsho-pill-icon svg { width: 13px; height: 13px; }
+input.bunsho-picker-field { flex: 1 1 auto; min-width: 0; height: auto; padding: 0; border: none; box-shadow: none; background: transparent; font-size: 13px; }
+input.bunsho-picker-field:focus { border: none; box-shadow: none; }
+.bunsho-picker-list { max-height: 50vh; overflow-y: auto; padding: 4px 2px; }
+.bunsho-picker-none { padding: 18px 0; margin: 0; text-align: center; font-size: 13px; color: var(--text-muted); }
+.bunsho-picker-group { padding: 6px 8px 4px; font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.bunsho-picker-group.is-rank1 { color: var(--bunsho-spectrum-factual); }
+button.bunsho-picker-row { all: unset; display: flex; box-sizing: border-box; width: 100%; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 4px; cursor: pointer; }
+button.bunsho-picker-row:hover { background: var(--background-modifier-hover); }
+.bunsho-picker-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--text-normal); }
+.bunsho-picker-coords { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* The desktop's faces, carried in this file because a plugin ships only main.js, manifest.json and styles.css.
  * @fontsource 5.3.0, Latin and Latin Extended. Other scripts fall back to the writer's own fonts.

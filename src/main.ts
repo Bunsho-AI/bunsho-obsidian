@@ -4,6 +4,7 @@ import { BUNSHO_ICON_ID, BUNSHO_ICON_SVG } from "@/assets/logo";
 import { ContinuityController } from "@/controllers/ContinuityController";
 import { confirmCheck } from "@/pages/ConfirmCheckModal";
 import { confirmReplaceProject } from "@/pages/ConfirmReplaceProjectModal";
+import { pickIssue } from "@/pages/JumpPickerModal";
 import { reviewPlan } from "@/pages/ReadingPlanModal";
 import { pickSource } from "@/pages/SourcePickerModal";
 import { ContinuityView, VIEW_TYPE } from "@/pages/ContinuityView";
@@ -25,6 +26,7 @@ export default class BunshoPlugin extends Plugin {
       confirmCheck: (quote) => confirmCheck(this.app, quote),
       reviewPlan: (request) => reviewPlan(this.app, request),
       pickSource: (options) => pickSource(this.app, options),
+      pickIssue: (open, coordinate) => pickIssue(this.app, open, coordinate),
       confirmReplaceProject: (name) => confirmReplaceProject(this.app, name),
       changed: () => this.renderViews(),
     });
@@ -34,6 +36,12 @@ export default class BunshoPlugin extends Plugin {
     this.addRibbonIcon(BUNSHO_ICON_ID, "Bunsho: continuity", () => void this.openPanel());
     this.addCommand({ id: "open-panel", name: "Open continuity panel", callback: () => void this.openPanel() });
     this.addCommand({ id: "check-manuscript", name: "Check manuscript", callback: () => void this.controller.check() });
+    // Only once a whole-book check stands behind it, and only on a chapter on the plan.
+    this.addCommand({ id: "check-chapter", name: "Check chapter", checkCallback: (checking) => {
+      if (!this.controller.chapterTarget() || this.controller.busy) return false;
+      if (!checking) void this.askChapterCheck();
+      return true;
+    } });
     this.addCommand({ id: "reading-plan", name: "Reading plan", callback: () => void this.controller.editPlan() });
     this.addCommand({ id: "choose-source", name: "Choose what to read", callback: () => void this.controller.chooseSource() });
     this.addCommand({ id: "sign-in", name: "Sign in with Google", callback: () => void this.controller.signIn() });
@@ -49,6 +57,8 @@ export default class BunshoPlugin extends Plugin {
       this.registerEvent(this.app.vault.on("delete", (file) => { void this.controller.deleted(file.path).catch(warn); onChange(file.path); }));
       this.registerEvent(this.app.vault.on("rename", (file, oldPath) => { void this.controller.moved(file.path, oldPath).catch(warn).finally(() => onChange(file.path, oldPath)); }));
       this.registerEvent(this.app.vault.on("modify", (file) => onChange(file.path))); // a note autosaves every couple of seconds while typing
+      // Not active-leaf-change: clicking the panel activates its leaf, and a redraw mid-click would lose the click.
+      this.registerEvent(this.app.workspace.on("file-open", () => this.eachView((view) => view.activeFileChanged())));
     });
   }
 
@@ -62,7 +72,14 @@ export default class BunshoPlugin extends Plugin {
     await this.app.workspace.revealLeaf(leaf);
   }
 
-  private renderViews(): void {
-    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) if (leaf.view instanceof ContinuityView) leaf.view.render();
+  private async askChapterCheck(): Promise<void> {
+    await this.openPanel();
+    this.eachView((view) => view.askChapterCheck());
+  }
+
+  private renderViews(): void { this.eachView((view) => view.render()); }
+
+  private eachView(action: (view: ContinuityView) => void): void {
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) if (leaf.view instanceof ContinuityView) action(leaf.view);
   }
 }

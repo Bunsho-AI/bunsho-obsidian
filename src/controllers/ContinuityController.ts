@@ -3,15 +3,16 @@
  * check lifecycle, findings. Pages read its state and call its actions; components below pages receive plain props.
  */
 import { Notice, type App } from "obsidian";
-import { keepSettledFindings } from "@/helpers/findings";
-import { applyPlan, buildItems, buildUnits, dropNoteIds, holdsNoteId, moveNoteIds, planQuote, snapshotId, sourceContains, type PlannedItem, type SavedPlan, type SourceChoice } from "@/helpers/sources";
+import { forgetCached, mergeCast, pruneReads, worldReads, type KeptRead } from "@/helpers/reads";
+import { itemsPending, mergeReview, parseLedger, SAVE_MESSAGE, type FindingStatus, type MergeResult, type PageLedger } from "@/helpers/reviewMerge";
+import { applyPlan, buildItems, buildUnits, dropNoteIds, holdsNoteId, itemAtOffset, moveNoteIds, planQuote, snapshotId, sourceContains, sourceProblems, type PlannedItem, type SavedPlan, type SourceChoice } from "@/helpers/sources";
 import { countWords } from "@/lib/contract/countWords";
 import { ProgressTracker } from "@/helpers/progress";
-import type { EngineIssueCitation } from "@/lib/contract/engine.types";
+import type { EngineIssue, EngineIssueCitation } from "@/lib/contract/engine.types";
 import { PipelineV3Client, PipelineV3Error } from "@/lib/contract/pipelineV3Client";
-import { PIPELINE_V3_PRICE_OP, type CastMember, type ChapterRead, type PipelineV3Health } from "@/lib/contract/pipelineV3.types";
+import { PIPELINE_V3_LIMITS, PIPELINE_V3_PRICE_OP, type ChapterRead, type PipelineV3Health } from "@/lib/contract/pipelineV3.types";
 import { pipelineV3ReviewCredits } from "@/lib/contract/pipelineV3Pricing";
-import { selectPassage } from "@/lib/obsidian/editor";
+import { activeNotePosition, selectPassage } from "@/lib/obsidian/editor";
 import { secretSessionStore } from "@/lib/obsidian/secretStore";
 import { readSourceNotes, sourceOptions } from "@/lib/obsidian/vault";
 import { readWorld, removeWorld, writeWorld, type WorldData } from "@/lib/obsidian/worldStore";
@@ -20,8 +21,8 @@ import { AUTH_CONFIG } from "@/lib/services/auth/authConfig";
 import { AuthError, TokenSource } from "@/lib/services/auth/authService";
 import { claimStarterCredits, formPost, makeTransport, readBalance, type ConnectionOptions } from "@/lib/services/engine/engineService";
 import { readProjectState, registerProject } from "@/lib/services/project/projectService";
-import { runReview, type ReviewOutcome } from "@/lib/services/review/reviewService";
-import { SIGNED_OUT, type Account, type Phase, type PluginData, type Scan } from "@/types";
+import { runReview, type ReviewOutcome, type ReviewRun } from "@/lib/services/review/reviewService";
+import { SIGNED_OUT, type Account, type Phase, type PluginData, type ReviewAction, type Scan, type StoppedReview } from "@/types";
 import { formatNumber } from "@/utils/format";
 import { acceptableEngineUrl, isLocalEngine } from "@/utils/url";
 
@@ -58,6 +59,8 @@ export interface ControllerHost {
   reviewPlan(request: PlanRequest): Promise<PlanAnswer | null>;
   /** Asks the writer to pick a folder or note; null when they do not. */
   pickSource(options: ReturnType<typeof sourceOptions>): Promise<SourceChoice | null>;
+  /** The Jump to issue picker; null when the writer closes it. */
+  pickIssue(open: readonly EngineIssue[], coordinate: (issue: EngineIssue) => string): Promise<EngineIssue | null>;
   /** Confirms switching the free project to this vault. */
   confirmReplaceProject(currentName: string | null): Promise<boolean>;
   /** Re-render whatever shows the state. */
@@ -65,6 +68,40 @@ export interface ControllerHost {
 }
 
 type ReadyScan = Extract<Scan, { status: "ready" }>;
+
+/** The chapter a check would cover, and what it costs. */
+export interface ChapterTarget { id: string; label: string; credits: number }
+/** What Check if fixed found. `none`: nothing ran, and the writer has been told or shown why. */
+export interface RecheckResult { kind: "closed" | "complete" | "incomplete" | "none"; message: string }
+
+type Prepared =
+  | { kind: "ready"; scan: ReadyScan; health: PipelineV3Health; review: ReviewOutcome; scope: Set<string> }
+  | { kind: "quiet" }
+  | { kind: "refused"; message: string };
+
+type Executed =
+  | { kind: "merged"; run: ReviewRun; merged: MergeResult; scan: Scan | null }
+  | { kind: "failed"; error: unknown }
+  | { kind: "ended" };
+
+const NO_FULL_REVIEW = "Check the whole manuscript first: a chapter can only be checked against a book Bunsho has read.";
+const RECHECK_INCOMPLETE = "Recheck incomplete. Existing findings were preserved.";
+const NOT_DETECTED = "Issue no longer detected after targeted recheck.";
+
+function validStopped(value: unknown): value is StoppedReview {
+  const stopped = value as Partial<StoppedReview> | null;
+  return Boolean(stopped) && (stopped?.status === "partial" || stopped?.status === "out_of_credits") && typeof stopped?.source?.path === "string"
+    && typeof stopped?.checked === "number" && typeof stopped?.failed === "number" && typeof stopped?.total === "number";
+}
+
+/** A review from before the ledger: the pages it read, under no policy, so none of them can count as checked for a chapter check. */
+function ledgerOf(review: ReviewOutcome): PageLedger {
+  const ledger = parseLedger((review as { ledger?: unknown }).ledger);
+  if (ledger) return ledger;
+  const unread = new Set(review.coverage?.unreadSources ?? []);
+  return Object.fromEntries(review.pages.filter((page) => !unread.has(page.sourceId))
+    .map((page) => [page.pageId, { rev: page.rev, order: page.order, policyId: "", checkedAt: review.checkedAt }]));
+}
 
 export class ContinuityController {
   data!: PluginData;
@@ -81,7 +118,7 @@ export class ContinuityController {
   private worldWrites: Promise<void> = Promise.resolve();
   /** Bumped when the local session ends: a review still finishing then keeps nothing. */
   private sessionGen = 0;
-  private projected: { world: WorldData; entities: WorldEntity[] } | null = null;
+  private projected: { world: WorldData; review: ReviewOutcome; entities: WorldEntity[] } | null = null;
   private saving: Promise<void> = Promise.resolve();
   /** The source of the review in flight, which can take minutes: a rename while it runs must reach its result. */
   private reviewing: SourceChoice | null = null;
@@ -95,7 +132,7 @@ export class ContinuityController {
     const { manuscriptFolder, ...rest } = saved ?? {};
     this.data = {
       source: null, plan: null, noteIds: {}, engineUrl: AUTH_CONFIG.engineUrl, devUid: "",
-      installId: crypto.randomUUID(), workspaceId: crypto.randomUUID(), dismissed: [], deliberate: [], lastReview: null, ...rest,
+      installId: crypto.randomUUID(), workspaceId: crypto.randomUUID(), dismissed: [], deliberate: [], fixed: [], lastReview: null, stopped: null, ...rest,
     };
     // Before the reading plan: the folder setting becomes the picked source, and a review from then cannot be mapped back.
     const folder = typeof manuscriptFolder === "string" ? manuscriptFolder.trim().replace(/^\/+|\/+$/gu, "") : "";
@@ -105,7 +142,10 @@ export class ContinuityController {
     const ids = (value: unknown): string[] => (Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : []);
     this.data.dismissed = ids(this.data.dismissed);
     this.data.deliberate = ids(this.data.deliberate);
+    this.data.fixed = ids(this.data.fixed);
     if (this.data.lastReview && !Array.isArray(this.data.lastReview.issues)) this.data.lastReview = null;
+    if (this.data.lastReview) this.data.lastReview = { ...this.data.lastReview, ledger: ledgerOf(this.data.lastReview) };
+    if (!validStopped(this.data.stopped)) this.data.stopped = null;
     // A vault's data.json can be synced or copied from elsewhere: never send a token to an address that is not ours to trust.
     if (!acceptableEngineUrl(this.data.engineUrl)) this.data.engineUrl = AUTH_CONFIG.engineUrl;
     await this.save();
@@ -126,7 +166,7 @@ export class ContinuityController {
   }
 
   /** A check or a dialog is in progress. */
-  private get busy(): boolean { return this.phase.kind !== "idle" && this.phase.kind !== "error"; }
+  get busy(): boolean { return this.phase.kind !== "idle" && this.phase.kind !== "error"; }
 
   private get app(): App { return this.host.app; }
   private get devUid(): string | undefined { return isLocalEngine(this.data.engineUrl) && this.data.devUid ? this.data.devUid : undefined; }
@@ -157,12 +197,14 @@ export class ContinuityController {
     const follow = <T extends SourceChoice>(choice: T): T => (choice.path === oldPath ? { ...choice, path }
       : choice.path.startsWith(`${oldPath}/`) ? { ...choice, path: `${path}${choice.path.slice(oldPath.length)}` } : choice);
     const review = this.data.lastReview;
-    const changes = holdsNoteId(this.data.noteIds, oldPath) || [this.data.source, this.reviewing, review?.source].some((choice) => choice && follow(choice) !== choice);
+    const { stopped } = this.data;
+    const changes = holdsNoteId(this.data.noteIds, oldPath) || [this.data.source, this.reviewing, review?.source, stopped?.source].some((choice) => choice && follow(choice) !== choice);
     if (!changes) return;
     this.data.noteIds = moveNoteIds(this.data.noteIds, oldPath, path);
     if (this.data.source) this.data.source = follow(this.data.source);
     if (this.reviewing) this.reviewing = follow(this.reviewing);
     if (review) this.data.lastReview = { ...review, source: follow(review.source) };
+    if (stopped) this.data.stopped = { ...stopped, source: follow(stopped.source) };
     await this.save();
   }
 
@@ -224,8 +266,10 @@ export class ContinuityController {
     if (items.length === 0) return { status: "empty", source };
     const plan = applyPlan(items, this.data.plan);
     const { units, pages } = buildUnits(plan.items);
+    const itemChars: Record<string, number> = {};
+    for (const unit of units) itemChars[unit.sourceId] = (itemChars[unit.sourceId] ?? 0) + unit.text.length;
     return {
-      status: "ready", source, items: plan.items, needsConfirming: plan.needsConfirming, pages, skipped,
+      status: "ready", source, items: plan.items, needsConfirming: plan.needsConfirming, pages, skipped, itemChars,
       snapshotId: snapshotId(units),
       chars: units.reduce((n, u) => n + u.text.length, 0), words: units.reduce((n, u) => n + countWords(u.text), 0),
     };
@@ -291,6 +335,8 @@ export class ContinuityController {
     this.sessionGen++;
     this.abort?.abort();
     this.data.lastReview = null;
+    this.data.stopped = null;
+    this.data.fixed = [];
     try { await this.save(); } finally { await this.setWorld(null); }
   }
 
@@ -323,7 +369,7 @@ export class ContinuityController {
       if (problem) return this.fail(problem);
       // The free plan's one project becomes this vault, on the writer's first confirmed check.
       if (account.project === "unregistered") await registerProject(this.connection(), this.data.workspaceId, this.projectName());
-      await this.runConfirmed(items, scan.source, health, this.priceFor(planQuote(items).chars, health));
+      await this.runAction({ kind: "full" }, items, scan.source, health, this.priceFor(planQuote(items).chars, health), null, "sweep");
     } catch (error) {
       this.fail(error instanceof Error ? error.message : "The check failed.");
     }
@@ -416,37 +462,347 @@ export class ContinuityController {
     await this.refreshAccount();
   }
 
-  private async runConfirmed(items: PlannedItem[], source: SourceChoice, health: PipelineV3Health, credits: number | null): Promise<void> {
+  /**
+   * Chapter checks compare against the book, so they wait for a whole-book check under the engine's current read policy. A
+   * check without that could only look inside the chapter, at the same price. This is the one place the plugins differ from
+   * the desktop, which charges for that check and says so afterwards.
+   */
+  chapterChecksOpen(): boolean {
+    const { account, world, scan } = this;
+    const { health } = account;
+    if (!health || !account.signedIn || account.project === "blocked" || !world?.fromFullReview || scan.status !== "ready" || !this.currentReview()) return false;
+    return world.reads.some((entry) => entry.readPolicyId === health.readPolicyId);
+  }
+
+  /** The plan items not checked at their current text, place and policy, and what reviewing them costs. Null before a first full review. */
+  changedChapters(): { count: number; credits: number } | null {
+    const { scan } = this;
+    const review = this.currentReview();
+    const { health } = this.account;
+    if (!this.chapterChecksOpen() || scan.status !== "ready" || !review || !health) return null;
+    const ids = itemsPending(scan.pages, review.ledger, health.policyId);
+    const credits = this.priceFor(ids.reduce((n, id) => n + (scan.itemChars[id] ?? 0), 0), health);
+    return ids.length > 0 && credits !== null ? { count: ids.length, credits } : null;
+  }
+
+  /** The chapter under the writer's cursor. A chapter is a plan item, however many pieces it reads in. */
+  chapterTarget(): ChapterTarget | null {
+    const { scan } = this;
+    if (!this.chapterChecksOpen() || scan.status !== "ready") return null;
+    const position = activeNotePosition(this.app);
+    const noteId = position ? this.data.noteIds[position.path] : undefined;
+    const item = position && noteId ? itemAtOffset(scan.items, noteId, position.offset) : null;
+    const credits = item ? this.priceFor(scan.itemChars[item.id] ?? 0, this.account.health) : null;
+    return item && credits !== null ? { id: item.id, label: item.label, credits } : null;
+  }
+
+  /** The plan items a finding cites, or null when one has gone from the plan and so cannot be checked. */
+  private recheckItems(issueId: string, scan: ReadyScan, review: ReviewOutcome): string[] | null {
+    const issue = review.issues.find((i) => i.issue_id === issueId);
+    if (!issue) return null;
+    const pages = new Map(review.pages.map((page) => [page.pageId, page]));
+    const ids = new Set<string>();
+    for (const citation of issue.citations) {
+      const id = pages.get(citation.page_id)?.sourceId;
+      if (!id || !scan.items.some((item) => item.id === id && item.included)) return null;
+      ids.add(id);
+    }
+    return ids.size > 0 ? [...ids] : null;
+  }
+
+  /** What Check if fixed costs for this finding: every chapter it cites, whole, in one review. Null when it cannot run. */
+  recheckQuote(issueId: string): number | null {
+    const { scan } = this;
+    const review = this.currentReview();
+    if (!this.chapterChecksOpen() || scan.status !== "ready" || !review) return null;
+    const ids = this.recheckItems(issueId, scan, review);
+    return ids ? this.priceFor(ids.reduce((n, id) => n + (scan.itemChars[id] ?? 0), 0), this.account.health) : null;
+  }
+
+  /** Review changed chapters, at the price on the button: the click is the consent, and the price binds. */
+  async reviewChanged(quoted: number): Promise<void> {
+    if (this.busy) return;
+    this.setPhase({ kind: "preparing" });
+    try {
+      const prepared = await this.prepareScoped(quoted, (scan, review, health) => itemsPending(scan.pages, review.ledger, health.policyId));
+      if (prepared.kind === "quiet") return this.idle();
+      if (prepared.kind === "refused") return this.fail(prepared.message);
+      await this.runAction({ kind: "changes" }, prepared.scan.items, prepared.scan.source, prepared.health, quoted, prepared.scope, "sweep");
+    } catch (error) {
+      this.fail(error instanceof Error ? error.message : "The review failed.");
+    }
+  }
+
+  /** Check one chapter, at the price the writer confirmed. */
+  async checkChapter(itemId: string, quoted: number): Promise<void> {
+    if (this.busy) return;
+    this.setPhase({ kind: "preparing" });
+    try {
+      const prepared = await this.prepareScoped(quoted, (scan) => (scan.items.some((item) => item.id === itemId && item.included) ? [itemId] : null));
+      if (prepared.kind === "quiet") return this.idle();
+      if (prepared.kind === "refused") return this.fail(prepared.message);
+      await this.runAction({ kind: "chapter", itemId }, prepared.scan.items, prepared.scan.source, prepared.health, quoted, prepared.scope, "check");
+    } catch (error) {
+      this.fail(error instanceof Error ? error.message : "The check failed.");
+    }
+  }
+
+  /**
+   * Check if fixed. Only the card asked about can close, and only on proof: the review completed, nothing moved while it ran,
+   * the policy still stands, every chapter the card cites was read whole, and the problem is not among what came back once
+   * re-found findings have taken their old cards' keys. Not finding a problem in text nobody has edited proves nothing, since
+   * a model's findings vary a little run to run, so a card whose cited chapters are all unchanged stays open.
+   */
+  async recheck(issueId: string, quoted: number): Promise<RecheckResult> {
+    const incomplete = (detail: string): RecheckResult => ({ kind: "incomplete", message: `${RECHECK_INCOMPLETE} ${detail}` });
+    if (this.busy) return { kind: "none", message: "" };
+    this.setPhase({ kind: "preparing" });
+    try {
+      const prepared = await this.prepareScoped(quoted, (scan, review) => this.recheckItems(issueId, scan, review));
+      if (prepared.kind === "quiet") { this.idle(); return { kind: "none", message: "" }; }
+      if (prepared.kind === "refused") { this.idle(); return incomplete(prepared.message); }
+      const { scan, health, review, scope } = prepared;
+      const session = this.sessionGen;
+      const issue = review.issues.find((i) => i.issue_id === issueId);
+      const revs = new Map(scan.pages.map((page) => [page.pageId, page.rev]));
+      const edited = issue?.citations.some((citation) => revs.get(citation.page_id) !== citation.source_ref?.rev) ?? false;
+
+      const done = await this.execute(scan.items, scan.source, health, quoted, scope, "check");
+      if (done.kind === "ended") { this.idle(); return { kind: "none", message: "" }; }
+      if (done.kind === "failed") {
+        this.idle();
+        await this.refreshAccount();
+        return incomplete(done.error instanceof Error ? done.error.message : "The check failed.");
+      }
+      const { run, merged, scan: after } = done;
+      const proven = merged.failed.length === 0 && !merged.incomplete && !merged.stale && !run.capped && run.lostFindings === 0
+        && after?.status === "ready" && after.snapshotId === run.snapshotId && !merged.survivors.has(issueId) && edited
+        && await this.policyStands(health);
+      if (session !== this.sessionGen) { this.idle(); return { kind: "none", message: "" }; } // signed out during that last question
+      if (proven) this.data.fixed = [...new Set([...this.data.fixed, issueId])];
+      const saved = await this.persist(merged, run, scan.items, scope, quoted);
+      if (!saved && proven) this.data.fixed = this.data.fixed.filter((id) => id !== issueId);
+      this.idle();
+      await this.refreshAccount();
+      if (!saved) return incomplete(SAVE_MESSAGE);
+      if (merged.message) return incomplete(merged.message);
+      return proven ? { kind: "closed", message: NOT_DETECTED } : { kind: "complete", message: "Recheck complete." };
+    } catch (error) {
+      this.idle();
+      return incomplete(error instanceof Error ? error.message : "The check failed.");
+    }
+  }
+
+  /** The engine still reviews under the policy this ran under. An answer that cannot be had proves nothing. */
+  private async policyStands(health: PipelineV3Health): Promise<boolean> {
+    try {
+      const now = await new PipelineV3Client(this.transport()).health();
+      return now.policyId === health.policyId;
+    } catch { return false; }
+  }
+
+  /** What a review of part of the book needs before anything is spent. New or changed lines on the plan go through the writer first. */
+  private async prepareScoped(quoted: number, pick: (scan: ReadyScan, review: ReviewOutcome, health: PipelineV3Health) => string[] | null): Promise<Prepared> {
+    const [scan] = await Promise.all([this.freshScan(), this.refreshAccount()]);
+    const { account } = this;
+    const { health } = account;
+    if (!account.signedIn) { new Notice(account.problem ?? "Sign in to Bunsho to check your manuscript."); await this.host.openPanel(); return { kind: "quiet" }; }
+    if (scan.status !== "ready") { new Notice("Bunsho: choose what to read first. See the panel."); await this.host.openPanel(); return { kind: "quiet" }; }
+    if (!health) { if (account.problem) new Notice(account.problem); await this.host.openPanel(); return { kind: "quiet" }; }
+    if (account.project === "blocked") return { kind: "quiet" };
+    if (scan.needsConfirming) { await this.openPlan(scan, "save", health); return { kind: "quiet" }; }
+    const review = this.currentReview();
+    if (!review || !this.chapterChecksOpen()) return { kind: "refused", message: NO_FULL_REVIEW };
+    const ids = pick(scan, review, health);
+    if (!ids || ids.length === 0) return { kind: "quiet" };
+    const scope = new Set(ids);
+    const problem = this.whyNotScoped(scan, scope, health, quoted);
+    return problem ? { kind: "refused", message: problem } : { kind: "ready", scan, health, review, scope };
+  }
+
+  /** whyNot, for a review that sends only some chapters whole: the rest are passages, listed but never charged. */
+  private whyNotScoped(scan: ReadyScan, scope: ReadonlySet<string>, health: PipelineV3Health, quoted: number): string | null {
+    const { units } = buildUnits(scan.items, () => "");
+    if (units.length > PIPELINE_V3_LIMITS.maxPages) return planQuote(scan.items).problems[0] ?? null;
+    if (units.some((unit) => unit.part) && !health.readingParts) return "Part of this is too long to read in one go, and the Bunsho service cannot read it in pieces yet. You were not charged.";
+    const problems = sourceProblems(units.filter((unit) => scope.has(unit.sourceId)));
+    if (problems.length > 0) return problems[0];
+    const { balance } = this.account;
+    return balance !== null && balance < quoted
+      ? `This check costs about ${formatNumber(quoted)} credits and you have ${formatNumber(balance)}. Add credits in Bunsho, then try again.` : null;
+  }
+
+  private async runAction(action: ReviewAction, items: PlannedItem[], source: SourceChoice, health: PipelineV3Health, credits: number | null, scope: Set<string> | null, reason: "sweep" | "check"): Promise<void> {
+    const done = await this.execute(items, source, health, credits, scope, reason);
+    if (done.kind === "ended") return this.idle();
+    if (done.kind === "failed") return this.reviewFailed(done.error, action, source, scope?.size ?? items.filter((item) => item.included).length, credits);
+    await this.persist(done.merged, done.run, items, scope, credits);
+    this.idle();
+    await this.refreshAccount();
+  }
+
+  /**
+   * Runs one review and merges its result into a new review, nothing saved yet. Whatever the engine read is kept even when the
+   * review fails: a charged failure sends its reads before its error, and a retry should not make the engine read them again.
+   */
+  private async execute(items: PlannedItem[], source: SourceChoice, health: PipelineV3Health, credits: number | null, scope: Set<string> | null, reason: "sweep" | "check"): Promise<Executed> {
     const abort = new AbortController();
     this.abort = abort;
     this.reviewing = source;
     const tracker = new ProgressTracker();
     const session = this.sessionGen;
-    const reads: ChapterRead[] = [];
-    let cast: CastMember[] = [];
+    const fresh: ChapterRead[] = [];
+    const { world } = this;
     this.setPhase({ kind: "checking", share: 0, waiting: true });
     try {
-      const outcome = await runReview({
-        items, source, health, workspaceId: this.data.workspaceId, client: new PipelineV3Client(this.transport()),
-        maxCredits: credits ?? undefined, signal: abort.signal,
-        onCast: (members) => { cast = members; },
-        callbacks: { onRead: (read) => { reads.push(read); }, onProgress: (p) => this.setPhase({ kind: "checking", share: tracker.update(p), waiting: false, stage: p.stage }) },
+      let run: ReviewRun;
+      try {
+        run = await runReview({
+          items, source, health, workspaceId: this.data.workspaceId, client: new PipelineV3Client(this.transport()), scope,
+          known: world ? { reads: world.reads, cast: world.cast, fromFullReview: world.fromFullReview } : undefined,
+          maxCredits: credits ?? undefined, signal: abort.signal,
+          callbacks: { onRead: (read) => { fresh.push(read); }, onProgress: (p) => this.setPhase({ kind: "checking", share: tracker.update(p), waiting: false, stage: p.stage }) },
+        });
+      } catch (error) {
+        if (session !== this.sessionGen) return { kind: "ended" };
+        await this.keepReads(fresh, health, items, error);
+        return { kind: "failed", error };
+      }
+      if (session !== this.sessionGen) return { kind: "ended" }; // signed out while it ran
+
+      let now: Scan | null = null;
+      try { now = await this.freshScan(); } catch (error) { console.warn("[Bunsho] could not read the notes after a review", error); }
+      if (session !== this.sessionGen) return { kind: "ended" };
+      const current = new Map(now?.status === "ready" ? now.pages.map((page) => [page.pageId, page]) : []);
+      const edited = new Set(run.pages.filter((page) => { const moved = current.get(page.pageId); return !moved || moved.rev !== page.rev || moved.order !== page.order; }).map((page) => page.pageId));
+      const sent = new Set(run.pages.map((page) => page.pageId));
+      const merged = mergeReview({
+        prior: this.currentReview(), run: { ...run, source: this.reviewing ?? run.source }, scope: scope ? "chapters" : "full", reason, checked: run.checked, edited,
+        pageSetChanged: [...current.keys()].some((pageId) => !sent.has(pageId)), alone: run.alone, policyId: health.policyId, checkedAt: run.checkedAt,
+        statusOf: (id) => this.statusOf(id), items, texts: run.texts,
       });
-      if (session !== this.sessionGen) return this.idle(); // signed out while it ran
-      const settled = new Set([...this.data.dismissed, ...this.data.deliberate]);
-      const issues = keepSettledFindings(outcome.issues, this.data.lastReview?.issues ?? [], settled);
-      this.data.lastReview = { ...outcome, issues, source: this.reviewing ?? outcome.source };
-      await this.save();
-      await this.setWorld({ checkedAt: outcome.checkedAt, reads, cast });
-      this.idle();
-      await this.refreshAccount();
-    } catch (error) {
-      if (error instanceof PipelineV3Error && error.code === "cancelled") this.idle();
-      else this.fail(error instanceof Error ? error.message : "The check failed.", error instanceof PipelineV3Error ? error.detail.charged : undefined);
+      // Reads streamed under a read policy other than the one they were filed under cannot be sent back.
+      const sameReadPolicy = run.readPolicyId === health.readPolicyId;
+      const kept: KeptRead[] = [...(sameReadPolicy ? world?.reads ?? [] : forgetCached(world?.reads ?? [])), ...fresh.map((read) => ({ readPolicyId: sameReadPolicy ? health.readPolicyId : null, read }))];
+      await this.setWorld({
+        // Paid for, whatever the scan after it managed to read: what was sent stays known.
+        reads: pruneReads(kept, merged.review.ledger, new Set([...current.keys(), ...sent])),
+        cast: mergeCast(world?.cast ?? [], run.cast, scope ? "chapters" : "full"),
+        fromFullReview: scope ? world?.fromFullReview ?? false : true,
+      });
+      if (session !== this.sessionGen) return { kind: "ended" }; // signed out while the World was being kept
+      return { kind: "merged", run, merged, scan: now };
     } finally {
       if (this.abort === abort) this.abort = null;
       this.reviewing = null;
     }
+  }
+
+  private async keepReads(fresh: readonly ChapterRead[], health: PipelineV3Health, items: PlannedItem[], error: unknown): Promise<void> {
+    // The engine checks every cached read before charging; one it refuses fails the whole start. Forget them, so the next attempt
+    // reads those chapters again instead of failing the same way. The World can still show them.
+    const refused = error instanceof PipelineV3Error && error.code === "invalid_request";
+    const { world } = this;
+    if (fresh.length === 0 && !(refused && world)) return;
+    const reads = [...(refused ? forgetCached(world?.reads ?? []) : world?.reads ?? []), ...fresh.map((read) => ({ readPolicyId: health.readPolicyId, read }))];
+    const inBook = new Set(buildUnits(items, () => "").pages.map((page) => page.pageId));
+    await this.setWorld({ reads: pruneReads(reads, this.currentReview()?.ledger ?? {}, inBook), cast: world?.cast ?? [], fromFullReview: world?.fromFullReview ?? false });
+  }
+
+  /** Stores a merged review and what stopped it, if anything did. False when it could not be saved: it still shows until restart. */
+  private async persist(merged: MergeResult, run: ReviewRun, items: readonly PlannedItem[], scope: ReadonlySet<string> | null, credits: number | null): Promise<boolean> {
+    const reopened = new Set(merged.reopened);
+    this.data.fixed = this.data.fixed.filter((id) => !reopened.has(id));
+    this.data.lastReview = merged.review;
+    this.data.stopped = merged.incomplete ? this.stoppedFrom("partial", merged, run, items, scope, merged.message ?? null, credits) : null;
+    try {
+      await this.save();
+      return true;
+    } catch (error) {
+      console.warn("[Bunsho] could not save the review", error);
+      this.data.stopped = this.stoppedFrom("partial", merged, run, items, scope, SAVE_MESSAGE, credits);
+      return false;
+    }
+  }
+
+  /** A stopped review's counts, by plan item: a chapter counts once every piece of it was checked. */
+  private stoppedFrom(status: StoppedReview["status"], merged: MergeResult, run: ReviewRun, items: readonly PlannedItem[], scope: ReadonlySet<string> | null, message: string | null, credits: number | null): StoppedReview {
+    const asked = items.filter((item) => item.included && (!scope || scope.has(item.id)));
+    const done = new Set(merged.done);
+    const checked = asked.filter((item) => run.pages.filter((page) => page.sourceId === item.id).every((page) => done.has(page.pageId))).length;
+    return { status, source: run.source, checked, failed: asked.length - checked, total: asked.length, message, credits };
+  }
+
+  /** The writer's words for a review that did not come back. Their findings are always left as they were. */
+  private async reviewFailed(error: unknown, action: ReviewAction, source: SourceChoice, total: number, credits: number | null): Promise<void> {
+    const stop = async (stopped: StoppedReview): Promise<void> => {
+      this.data.stopped = stopped;
+      try { await this.save(); } catch (saveError) { console.warn("[Bunsho] could not save", saveError); }
+    };
+    if (error instanceof PipelineV3Error && error.code === "cancelled") {
+      // A review the engine says it did not charge leaves nothing to say. An unknown charge is not a free one.
+      if (error.detail.charged !== false) await stop({ status: "partial", source, checked: 0, failed: total, total, message: error.message, credits });
+      this.idle();
+      return;
+    }
+    if (error instanceof PipelineV3Error && error.code === "insufficient_credits") {
+      await stop({ status: "out_of_credits", source, checked: 0, failed: total, total, message: null, credits });
+      this.idle();
+      await this.refreshAccount();
+      return;
+    }
+    const charged = error instanceof PipelineV3Error ? error.detail.charged : undefined;
+    // A size refusal says what to do instead; trying again would fail the same way.
+    // A chapter check whose reads the engine refused has no book to compare against: the whole-book check is the way back.
+    const canRetry = !(error instanceof PipelineV3Error && (error.code === "too_large" || (error.code === "invalid_request" && action.kind !== "full")));
+    this.setPhase({ kind: "error", message: error instanceof Error ? error.message : "The check failed.", charged, ...(canRetry ? { action } : {}) });
+    await this.refreshAccount();
+  }
+
+  /** The review that failed, at what it costs now. Null when it no longer can run. */
+  retryQuote(): number | null {
+    const { phase, scan } = this;
+    if (phase.kind !== "error" || !phase.action || scan.status !== "ready") return null;
+    if (phase.action.kind === "full") return this.price();
+    if (phase.action.kind === "changes") return this.changedChapters()?.credits ?? null;
+    const { itemId } = phase.action;
+    return scan.itemChars[itemId] === undefined ? null : this.priceFor(scan.itemChars[itemId], this.account.health);
+  }
+
+  /** Tries the failed review again, at the price on its button. A full review goes through its own price dialog. */
+  async retry(): Promise<void> {
+    const { phase } = this;
+    if (phase.kind !== "error" || !phase.action) return;
+    const { action } = phase;
+    const quoted = this.retryQuote();
+    this.idle();
+    if (action.kind === "full") return this.check();
+    if (quoted === null) return;
+    if (action.kind === "changes") return this.reviewChanged(quoted);
+    return this.checkChapter(action.itemId, quoted);
+  }
+
+  /** Jump to issue. Free and local. */
+  pickIssue(open: readonly EngineIssue[], coordinate: (issue: EngineIssue) => string): Promise<EngineIssue | null> { return this.host.pickIssue(open, coordinate); }
+
+  /** What stopped the last review, when it is about what is picked now. */
+  stoppedReview(): StoppedReview | null {
+    const { stopped, source } = this.data;
+    return stopped && source && stopped.source.kind === source.kind && stopped.source.path === source.path ? stopped : null;
+  }
+
+  /** The writer has read why the review stopped. The status line still says so until the next review. */
+  async dismissStopped(): Promise<void> {
+    if (!this.data.stopped) return;
+    this.data.stopped = { ...this.data.stopped, message: null };
+    this.host.changed();
+    await this.save();
+  }
+
+  private statusOf(id: string): FindingStatus {
+    if (this.data.dismissed.includes(id)) return "dismissed";
+    if (this.data.deliberate.includes(id)) return "closed_manual";
+    return this.data.fixed.includes(id) ? "closed_auto" : "open";
   }
 
   /** How the free project is named on every surface ("Your free project is …"): the vault is the project. */
@@ -463,13 +819,16 @@ export class ContinuityController {
     return write;
   }
 
-  /** The World of the last check of what is picked now, or null when there is none to show. */
+  /** The World as the checks of what is picked now read it, each page at its last check. Null when there is none to show. */
   worldEntities(): WorldEntity[] | null {
     const review = this.currentReview();
     const { world } = this;
-    if (!review || !world || world.checkedAt !== review.checkedAt) return null;
+    if (!review || !world) return null;
     try {
-      if (this.projected?.world !== world) this.projected = { world, entities: projectWorld(world.cast, world.reads) };
+      if (this.projected?.world === world && this.projected.review === review) return this.projected.entities;
+      const reads = worldReads(world.reads, review.ledger);
+      if (reads.length === 0) return null;
+      this.projected = { world, review, entities: projectWorld(world.cast, reads) };
       return this.projected.entities;
     } catch (error) {
       console.warn("[Bunsho] could not build the World", error);
@@ -477,22 +836,24 @@ export class ContinuityController {
     }
   }
 
-  /** What this World lacks because the check could not read part of the story, in the writer's terms. */
+  /** What this World lacks because no check has fully read that part of the story, in the writer's terms. */
   worldGaps(): string[] {
     const review = this.currentReview();
     const { world } = this;
     if (!review || !world) return [];
-    const read = new Set(world.reads.map((r) => r.pageId));
-    return [...new Set(review.pages.filter((p) => !read.has(p.pageId)).map((p) => p.label))];
+    const read = new Set(worldReads(world.reads, review.ledger).map((r) => r.pageId));
+    const plan = new Set(review.coverage.sources.map((source) => source.id));
+    return [...new Set(review.pages.filter((p) => plan.has(p.sourceId) && !read.has(p.pageId)).map((p) => p.label))];
   }
 
   /** Why a fact may no longer match the story: its page changed or left the plan since the check. Null when it still stands. */
   factNote(row: Pick<WorldRow, "pageId">): string | null {
     const { scan } = this;
-    const page = this.currentReview()?.pages.find((p) => p.pageId === row.pageId);
-    if (!page || scan.status !== "ready") return "edited since the check";
+    const review = this.currentReview();
+    const page = review?.pages.find((p) => p.pageId === row.pageId);
+    if (!review || !page || scan.status !== "ready") return "edited since the check";
     if (scan.items.some((item) => item.id === page.sourceId && !item.included)) return "left out of the reading plan since the check";
-    return scan.pages.find((p) => p.pageId === row.pageId)?.rev === page.rev ? null : "edited since the check";
+    return scan.pages.find((p) => p.pageId === row.pageId)?.rev === (review.ledger[row.pageId]?.rev ?? page.rev) ? null : "edited since the check";
   }
 
   /** Selects the passage a World fact came from. */
@@ -512,21 +873,22 @@ export class ContinuityController {
   async markDeliberate(issueId: string, deliberate: boolean): Promise<void> { await this.setDecisions(issueId, { deliberate }); }
 
   /** Reopens a settled finding, whichever way it was settled. */
-  async restoreFinding(issueId: string): Promise<void> { await this.setDecisions(issueId, { dismissed: false, deliberate: false }); }
+  async restoreFinding(issueId: string): Promise<void> { await this.setDecisions(issueId, { dismissed: false, deliberate: false, fixed: false }); }
 
   /** A decision that could not be saved is taken back and the failure reported, so the panel never shows one a restart would lose. */
-  private async setDecisions(issueId: string, change: Partial<Record<"dismissed" | "deliberate", boolean>>): Promise<void> {
-    const apply = (key: "dismissed" | "deliberate", on: boolean) => {
+  private async setDecisions(issueId: string, change: Partial<Record<"dismissed" | "deliberate" | "fixed", boolean>>): Promise<void> {
+    const KEYS = ["dismissed", "deliberate", "fixed"] as const;
+    const apply = (key: (typeof KEYS)[number], on: boolean) => {
       const set = new Set(this.data[key]);
       if (on) set.add(issueId); else set.delete(issueId);
       this.data[key] = [...set];
     };
-    const before = { dismissed: this.data.dismissed.includes(issueId), deliberate: this.data.deliberate.includes(issueId) };
-    for (const key of ["dismissed", "deliberate"] as const) if (change[key] !== undefined) apply(key, change[key]);
+    const before = { dismissed: this.data.dismissed.includes(issueId), deliberate: this.data.deliberate.includes(issueId), fixed: this.data.fixed.includes(issueId) };
+    for (const key of KEYS) if (change[key] !== undefined) apply(key, change[key]);
     try {
       await this.save();
     } catch (error) {
-      for (const key of ["dismissed", "deliberate"] as const) if (change[key] !== undefined) apply(key, before[key]);
+      for (const key of KEYS) if (change[key] !== undefined) apply(key, before[key]);
       throw error;
     } finally {
       this.host.changed();

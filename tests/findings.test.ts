@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cardEvidence, displayOrder, keepSettledFindings, nextOpenIssue, railEvidence, resolverContext, resolutionOf } from "@/helpers/findings";
+import { cardEvidence, displayOrder, nextOpenIssue, railEvidence, resolverContext, resolutionOf } from "@/helpers/findings";
 import { PANEL_TABS } from "@/helpers/panelTabs";
 import type { EngineIssue, EngineIssueCitation } from "@/lib/contract/engine.types";
 
@@ -75,29 +75,9 @@ describe("order and carried decisions", () => {
     expect(nextOpenIssue(open, "e")?.issue_id).toBe("w1");
   });
 
-  const finding = (id: string, quotes: string[], subject = "Mira", pages = ["p1", "p2"]) => issue({
-    issue_id: id, context_json: JSON.stringify({ findingType: "contradiction", subject }),
-    citations: quotes.map((quote, i) => cite(pages[i] ?? "p1", "prior_fact", quote)),
-  });
-
-  it("a settled finding keeps its id when the writer rewords one side", () => {
-    const before = finding("old", ["Her eyes were green.", "Her eyes were brown."]);
-    const after = finding("new", ["Her eyes were green.", "By then her eyes were brown and tired."]);
-    expect(keepSettledFindings([after], [before], new Set(["old"]))[0].issue_id).toBe("old");
-  });
-
-  it("a new problem never takes an old decision", () => {
-    const before = finding("old", ["Her eyes were green.", "Her eyes were brown."]);
-    expect(keepSettledFindings([finding("n1", ["He sold the boat.", "He kept the boat."])], [before], new Set(["old"]))[0].issue_id).toBe("n1");
-    expect(keepSettledFindings([finding("n2", ["Her eyes were green.", "x"], "Juna")], [before], new Set(["old"]))[0].issue_id).toBe("n2");
-    expect(keepSettledFindings([finding("n3", ["Her eyes were green.", "x"], "Mira", ["p1", "p9"])], [before], new Set(["old"]))[0].issue_id).toBe("n3");
-  });
-
-  it("does nothing when the finding came back unchanged, was never settled, or the match is ambiguous", () => {
-    const before = finding("old", ["Her eyes were green.", "Her eyes were brown."]);
-    expect(keepSettledFindings([before], [before], new Set(["old"]))[0].issue_id).toBe("old");
-    expect(keepSettledFindings([finding("n", ["Her eyes were green.", "y"])], [before], new Set())[0].issue_id).toBe("n");
-    const twins = [finding("a", ["Her eyes were green.", "y"]), finding("b", ["Her eyes were green.", "z"])];
-    expect(keepSettledFindings(twins, [before], new Set(["old"])).map((i) => i.issue_id)).toEqual(["a", "b"]);
+  it("a card closed as no longer detected is settled as the desktop words it", () => {
+    expect(resolutionOf("a", new Set(), new Set(), new Set(["a"]))).toBe("closed auto");
+    expect(resolutionOf("a", new Set(["a"]), new Set(), new Set(["a"]))).toBe("dismissed");
+    expect(resolutionOf("a", new Set(), new Set())).toBeNull();
   });
 });
