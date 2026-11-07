@@ -2,7 +2,9 @@
 export async function requestUrl({ url, method, body, headers }: { url: string; method?: string; body?: string; headers?: Record<string, string> }) {
   const response = await fetch(url, { method, body, headers });
   const text = await response.text();
-  return { status: response.status, json: text ? (JSON.parse(text) as unknown) : null };
+  let json: unknown = null;
+  try { json = text ? (JSON.parse(text) as unknown) : null; } catch { json = null; }
+  return { status: response.status, text, json };
 }
 export class Notice { constructor(readonly message: string) {} }
 export class MarkdownView {}

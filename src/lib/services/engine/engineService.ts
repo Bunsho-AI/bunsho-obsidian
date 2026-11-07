@@ -50,6 +50,39 @@ export async function postJson(options: ConnectionOptions, path: string, body: u
   return response.json as unknown;
 }
 
+/** A non-OK answer to a metered call, with the body kept: `charged` is the engine's own figure, null when it did not say. */
+export class EngineRequestError extends Error {
+  constructor(message: string, readonly status: number, readonly code: string | null, readonly charged: number | null, readonly body: string) {
+    super(message);
+    this.name = "EngineRequestError";
+  }
+}
+
+/** The engine's answer took longer than the caller waits. It may still have spent: a retry carries the same key. */
+export class EngineTimeoutError extends Error {}
+
+const bodyField = (body: string, field: string): unknown => { try { return (JSON.parse(body) as Record<string, unknown> | null)?.[field]; } catch { return undefined; } };
+
+/**
+ * A metered POST: the idempotency key dedupes a retry, the error body is kept, and the wait is bounded (requestUrl has no timeout of its own). The request itself cannot be
+ * cancelled, so a late answer is dropped.
+ */
+export async function postMetered(options: ConnectionOptions, path: string, body: unknown, idempotencyKey: string, timeoutMs: number): Promise<unknown> {
+  const request = async (): Promise<unknown> => {
+    const response = await requestUrl({ url: `${options.baseUrl.replace(/\/+$/u, "")}${path}`, method: "POST", contentType: "application/json",
+      body: JSON.stringify(body), headers: { ...(await authHeaders(options)), "x-idempotency-key": idempotencyKey }, throw: false });
+    if (response.status >= 200 && response.status < 300) return response.json as unknown;
+    const text = typeof response.text === "string" ? response.text : "";
+    const code = bodyField(text, "code");
+    const charged = bodyField(text, "charged");
+    throw new EngineRequestError(`Engine answered ${response.status}`, response.status, typeof code === "string" ? code : null,
+      typeof charged === "number" && Number.isFinite(charged) && charged >= 0 ? charged : null, text.slice(0, 2_000));
+  };
+  let timer: number | undefined;
+  const timeout = new Promise<never>((_, reject) => { timer = window.setTimeout(() => reject(new EngineTimeoutError(`No answer from ${path}`)), timeoutMs); });
+  try { return await Promise.race([request(), timeout]); } finally { window.clearTimeout(timer); }
+}
+
 /** GET that resolves to null instead of throwing (optional reads such as the plan and the project registry). */
 export async function tryGetJson(transport: PipelineV3Transport, path: string): Promise<unknown> {
   try { return await transport.getJson(path); } catch { return null; }
@@ -64,9 +97,12 @@ export async function claimStarterCredits(connection: ConnectionOptions): Promis
   try { await postJson(connection, "/v1/credits/starter", {}); return true; } catch { return false; }
 }
 
-/** The account's spendable credits from GET /v1/credits (`total`), or null when the engine does not say. */
-export async function readBalance(transport: PipelineV3Transport): Promise<number | null> {
-  const answer = await transport.getJson("/v1/credits");
-  const total = (answer as { total?: unknown } | null)?.total;
-  return typeof total === "number" && Number.isFinite(total) ? total : null;
+/** The account's spendable credits and the engine's price list from GET /v1/credits, each null when the engine does not say. */
+export async function readCredits(transport: PipelineV3Transport): Promise<{ balance: number | null; opCosts: Record<string, number> | null }> {
+  const answer = (await transport.getJson("/v1/credits")) as { total?: unknown; opCosts?: unknown } | null;
+  const total = answer?.total;
+  const costs = answer?.opCosts;
+  const priced = costs && typeof costs === "object" && !Array.isArray(costs)
+    ? Object.fromEntries(Object.entries(costs).filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1]))) : null;
+  return { balance: typeof total === "number" && Number.isFinite(total) ? total : null, opCosts: priced };
 }

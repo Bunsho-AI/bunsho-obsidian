@@ -5,6 +5,7 @@ export const DELETE_REMOVES = [
   "Your findings, and what you decided about them",
   "The World: what checks read from your book",
   "Your canon: every fact, name and character you declared",
+  "Your Director scenes, and any draft you have not kept. Scenes you kept stay in your notes.",
   "Your reading plan, and what you chose to read",
 ] as const;
 
@@ -13,7 +14,7 @@ export function confirmDeleteData(app: App, otherAccounts: boolean): Promise<boo
     let answered = false;
     const modal = new Modal(app);
     modal.titleEl.setText("Delete my Bunsho data?");
-    modal.contentEl.createEl("p", { text: "This removes, from this vault's plugin folder:" });
+    modal.contentEl.createEl("p", { text: "This removes, from this vault:" });
     const list = modal.contentEl.createEl("ul");
     for (const line of DELETE_REMOVES) list.createEl("li", { text: line });
     if (otherAccounts) modal.contentEl.createEl("p", { text: "It also removes the same data kept here for another Bunsho account that signed in on this vault." });

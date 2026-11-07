@@ -33,6 +33,8 @@ import { PANEL_TABS, type PanelTabId } from "@/helpers/panelTabs";
 import { worldChanges, type WorldEntity, type WorldFilter } from "@/helpers/world";
 import { lapsedTitle } from "@/helpers/account";
 import { PEN_FAILURE_COPY, WorldPen } from "@/pages/ContinuityView/WorldPen";
+import { DirectorTab } from "@/pages/ContinuityView/DirectorTab";
+import type { DirectorController } from "@/controllers/DirectorController";
 import { SourcePrompt } from "@/organisms/SourcePrompt";
 import { SignInPanel } from "@/organisms/SignInPanel";
 import { formatNumber, formatShortDate } from "@/utils/format";
@@ -80,11 +82,17 @@ export class ContinuityView extends ItemView {
   /** What the panel was last about. See the controller's scopeGeneration. */
   private shownScope = 0;
   private readonly pen: WorldPen;
+  private readonly directorTab: DirectorTab;
   /** Why a Revert on the Resolve screen did not land. */
   private revertFailure: { id: string; message: string } | null = null;
 
-  constructor(leaf: WorkspaceLeaf, private readonly controller: ContinuityController) {
+  constructor(leaf: WorkspaceLeaf, private readonly controller: ContinuityController, director: DirectorController) {
     super(leaf);
+    this.directorTab = new DirectorTab(director, controller, {
+      redraw: (focusKey) => { if (focusKey) this.focusNext = focusKey; this.render(); },
+      composing: (composing) => this.setComposing(composing),
+      openBilling: () => window.open(UPGRADE_URL),
+    });
     this.pen = new WorldPen(controller, {
       redraw: (focusKey) => { if (focusKey) this.focusNext = focusKey; this.render(); },
       composing: (composing) => this.setComposing(composing),
@@ -109,9 +117,13 @@ export class ContinuityView extends ItemView {
       // instanceOf, not instanceof: a panel in a pop-out window has its own HTMLElement.
       if (target instanceof Object && (target as Node).instanceOf?.(HTMLElement) && (target as HTMLElement).isConnected && !(target as HTMLElement).closest(".bunsho-chapter-control")) this.closeConfirm(null);
     });
+    // Moving between sections of one note fires nothing, and the Director's line names the chapter a paid action goes to. Before the click, while no press can be lost.
+    this.registerDomEvent(this.contentEl, "pointerenter", () => { if (this.tab === "director" && this.directorTab.chapterMoved()) this.render(); });
     this.render();
     await this.controller.refresh();
   }
+
+  async onClose(): Promise<void> { this.directorTab.dispose(); await super.onClose(); }
 
   /** The writer moved to another note: Check chapter now means that one. */
   activeFileChanged(): void { this.confirming = null; this.render(); }
@@ -181,6 +193,7 @@ export class ContinuityView extends ItemView {
     if (c.scopeGeneration !== this.shownScope) {
       this.shownScope = c.scopeGeneration;
       this.pen.reset();
+      this.directorTab.reset();
       this.worldSearch = "";
       this.worldOpen.clear();
       this.worldHistory.clear();
@@ -225,7 +238,9 @@ export class ContinuityView extends ItemView {
       if (this.renderResolver(body)) return;
       this.renderSource(body, scan.source.kind === "folder" && scan.source.path === "/" ? "Whole vault" : scan.source.path);
       PanelTabs(body, { active: this.tab, onSelect: (tab) => { this.tab = tab; this.resetScroll = true; this.render(); }, tabs: PANEL_TABS });
-      if (this.tab === "world") this.renderWorld(body); else this.renderFindings(body);
+      if (this.tab === "director") this.directorTab.render(body);
+      else if (this.tab === "world") this.renderWorld(body);
+      else this.renderFindings(body);
       return;
     }
     SourcePrompt(body, { scan, onChoose: () => void c.chooseSource() });

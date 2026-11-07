@@ -9,12 +9,16 @@
  *
  *   node scripts/mock-engine.mjs 8799 [--paid] [--other-project] [--enforce] [--balance N]
  *
+ * The Director's routes (POST /v1/plan, /v1/render/scene, /v1/render/beat) meter as the engine does: 33 a plan, 67 a beat, an idempotency key required and replayed, a body that the
+ * engine's schema would refuse is a 400 before any charge, 402 past the balance. Prose is built from the beats it was sent, so any script comes back in that script.
+ *
  * POST /__mock with JSON changes its behaviour while it runs: see `options` below.
  */
 import { createHash } from "node:crypto";
 import http from "node:http";
 import { pathToFileURL } from "node:url";
 import { WebSocketServer } from "ws";
+import { planProblem, renderBeatProblem, renderSceneProblem } from "./engine-schema.mjs";
 
 const PROTOCOL = "pipeline-v3";
 export const POLICY_ID = "a".repeat(64);
@@ -31,6 +35,38 @@ const RULES = [
 const MOVES = /Mira (?:went|walked|came) to ([^.\n]+)\./gu;
 const GROUPS = /\b((?:[Tt]he )?[\p{Lu}][\p{L}]* Guild)\b/gu;
 const START_KEYS = new Set(["reviewId", "workspaceId", "snapshotId", "scope", "policyId", "readPolicyId", "pages", "cachedReads", "pins", "focusNames", "maxCredits"]);
+
+const OP_COSTS = { plan_scene: 33, render_beat: 67, extract_page: 7 };
+const slug = (text) => `sc_${text.toLowerCase().replace(/[^a-z0-9]+/gu, "_").replace(/^_|_$/gu, "").slice(0, 24) || "scene"}`;
+function plannedBeat(order, intent, directions = []) {
+  return { beatId: `bt_${order}`, order, intent, turn: `What changes in beat ${order}.`, pacing: "standard", entityIds: [], knowledgeEffects: [], stateEffects: [], directions, status: "planned" };
+}
+function planScene(body, options) {
+  const lines = body.direction.split(/(?<=[.。!?！？])\s*/u).map((line) => line.trim()).filter(Boolean);
+  const count = options.directorBeats ?? 3;
+  const note = body.regenerate?.note;
+  const beats = Array.from({ length: count }, (_, i) => plannedBeat(i + 1, `${lines[i % lines.length] ?? body.direction}${note ? ` (${note})` : ""}${body.regenerate ? " Again." : ""}${count > lines.length ? ` Beat ${i + 1}.` : ""}`, note ? [note] : []));
+  const prior = body.scene;
+  const record = options.directorRecord ?? [];
+  if (body.regenerateBeat) {
+    const scene = { ...prior, beats: prior.beats.map((b) => (b.beatId === body.regenerateBeat.beatId ? { ...plannedBeat(b.order, `Regenerated beat ${b.order}.`), beatId: b.beatId, directions: [...b.directions, ...(body.regenerateBeat.note ? [body.regenerateBeat.note] : [])] } : b)), record };
+    return { scene, preflight: [], record };
+  }
+  const scene = { version: 1, sceneId: prior?.sceneId ?? slug(body.direction), title: `${prior ? "New card: " : ""}${lines[0] ?? body.direction}`.slice(0, 120), anchor: prior?.anchor ?? { pageId: body.targetPageId, placement: "append" },
+    directorNotes: prior?.directorNotes ?? [body.direction], pov: { mode: "third_limited", tense: "past" }, presence: [], goal: lines[0] ?? body.direction, description: "Where, when and who is there, in plain sentences.", beats, status: "drafting", preflight: [], record };
+  return { scene, preflight: [], record };
+}
+function renderScene(body, options) {
+  const passages = body.scene.beats.map((beat) => options.directorProse ?? `Beat ${beat.order} as prose: ${beat.intent}`);
+  let text = "";
+  const spans = passages.map((passage, i) => { if (i) text += "\n\n"; const start = text.length; text += passage; return { beatId: body.scene.beats[i].beatId, beatOrder: body.scene.beats[i].order, start, end: text.length }; });
+  return { text, wordCount: text.trim().split(/\s+/u).length, spans };
+}
+const DIRECTOR_ROUTES = {
+  "/v1/plan": { op: "plan_scene", units: () => 1, problem: planProblem, run: planScene },
+  "/v1/render/scene": { op: "render_beat", units: (b) => b.scene.beats.length, problem: renderSceneProblem, run: renderScene },
+  "/v1/render/beat": { op: "render_beat", units: () => 1, problem: renderBeatProblem, run: (b) => ({ prose: `Rewritten beat ${b.scene.beats.find((x) => x.beatId === b.beatId).order}${b.followingProse ? ", leading on" : ""}: ${b.scene.beats.find((x) => x.beatId === b.beatId).directions.at(-1) ?? "again"}.` }) },
+};
 
 const sha = (text) => createHash("sha256").update(text).digest("hex");
 const PIN_KEYS = new Set(["pinId", "entityId", "entityName", "aliases", "dimension", "value", "declaredAt"]);
@@ -140,6 +176,10 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
   const sentPassages = [];
   const seenReviews = new Set();
   /** Set at start or through POST /__mock; each is what the real engine can do. */
+  const directorCalls = [];
+  const directorReplays = new Map();
+  const directorFailedKeys = new Set();
+  let directorCharged = 0;
   const options = {
     /** { code, message, charged }: refuses after charging and after streaming its reads, as a failure mid-run does. */
     failAfterReads: null,
@@ -184,7 +224,43 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
       if (starter > 0) { balance += starter; starter = 0; }
       return json({ balance, plan: 0, extra: balance, total: balance });
     }
-    if (req.url === "/v1/credits") return json({ balance, plan: 0, extra: balance, total: balance });
+    if (req.url === "/v1/credits") return json({ balance, plan: 0, extra: balance, total: balance, opCosts: options.noOpCosts ? undefined : OP_COSTS });
+    if (req.method === "POST" && DIRECTOR_ROUTES[req.url]) {
+      let raw = "";
+      req.on("data", (chunk) => { raw += chunk; });
+      req.on("end", () => {
+        const route = DIRECTOR_ROUTES[req.url];
+        const body = JSON.parse(raw || "{}");
+        directorCalls.push({ url: req.url, key: req.headers["x-idempotency-key"], body });
+        const key = req.headers["x-idempotency-key"];
+        const reply = (status, payload) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(payload)); };
+        if (!key) return reply(400, { code: "IDEMPOTENCY_KEY_REQUIRED", message: "needs a key" });
+        const problem = route.problem(body);
+        if (problem) return reply(400, { statusCode: 400, message: problem });
+        const held = directorReplays.get(key);
+        if (held) return held.raw === raw ? reply(held.status, held.payload) : reply(422, { code: "IDEMPOTENCY_KEY_BODY_MISMATCH", message: "another body" });
+        if (directorFailedKeys.has(key)) return reply(409, { code: "IDEMPOTENCY_REPLAY_UNAVAILABLE", message: "That key has already run." });
+        const finish = () => {
+          const cost = OP_COSTS[route.op] * route.units(body);
+          if (balance < cost) return reply(402, { code: "INSUFFICIENT_CREDITS", message: "Out of credits" });
+          const failure = options.directorFail;
+          if (failure) {
+            if (failure.once) options.directorFail = null;
+            if (failure.charged) balance -= failure.charged;
+            directorFailedKeys.add(key);
+            return reply(failure.status ?? 500, { code: failure.code ?? "INTERNAL", message: "It failed", ...(failure.charged !== undefined ? { charged: failure.charged } : {}) });
+          }
+          balance -= cost;
+          directorCharged += cost;
+          const payload = route.run(body, options);
+          directorReplays.set(key, { raw, status: 200, payload });
+          if (options.directorLoseAnswer) { options.directorLoseAnswer = false; res.destroy(); return undefined; }
+          return reply(200, payload);
+        };
+        if (options.directorDelayMs) setTimeout(finish, options.directorDelayMs); else finish();
+      });
+      return undefined;
+    }
     if (req.url === "/v1/billing/subscription") {
       if (options.subscriptionDown) { res.writeHead(503); return res.end(); }
       return json({ active: options.paid, tier: options.paid ? options.tier : null, status: options.paid ? "active" : null, renewsAt: options.renewsAt ?? null, cancelAtPeriodEnd: false, pendingTier: null, pendingAppliesAt: null });
@@ -281,7 +357,7 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
     });
   });
   return new Promise((resolve) => server.listen(port, "127.0.0.1", () => resolve({
-    port: server.address().port, requests, starts, sentPages, sentPassages, options, balance: () => balance, registration: () => registration, close: () => new Promise((done) => { wss.close(); server.closeAllConnections?.(); server.close(done); }),
+    port: server.address().port, directorCalls, directorCharged: () => directorCharged, requests, starts, sentPages, sentPassages, options, balance: () => balance, registration: () => registration, close: () => new Promise((done) => { wss.close(); server.closeAllConnections?.(); server.close(done); }),
   })));
 }
 

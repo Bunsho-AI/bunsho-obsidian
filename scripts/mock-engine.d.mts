@@ -22,6 +22,13 @@ export interface MockBehaviour {
   tickMs: number;
   policyId?: string;
   currentReadPolicy?: string;
+  noOpCosts?: boolean;
+  directorBeats?: number;
+  directorProse?: string;
+  directorDelayMs?: number;
+  directorLoseAnswer?: boolean;
+  directorRecord?: unknown[];
+  directorFail?: { status?: number; code?: string; charged?: number; once?: boolean } | null;
 }
 export interface MockEngineOptions extends Partial<MockBehaviour> { port?: number; balance?: number; holdOpen?: boolean; registered?: { workspaceId: string; name?: string | null } | null; starter?: number; readingParts?: boolean }
 export interface MockStart {
@@ -44,6 +51,9 @@ export interface MockEngine {
   sentPassages: Array<{ pageId: string; paragraphs: Array<{ index: number; start: number; end: number; text: string }> }>;
   options: MockBehaviour;
   balance(): number;
+  /** Every Director call, as sent. */
+  directorCalls: Array<{ url: string; key: string | undefined; body: Record<string, unknown> }>;
+  directorCharged(): number;
   registration(): { workspaceId: string; name: string | null } | null;
   close(): Promise<void>;
 }

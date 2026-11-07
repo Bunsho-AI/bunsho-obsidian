@@ -1,0 +1,941 @@
+{
+ "entities": {
+  "version": 1,
+  "entities": [
+   {
+    "entityId": "ent_mira_vale",
+    "canonicalName": "Mira Vale",
+    "type": "character",
+    "aliases": [
+     {
+      "text": "Mira Vale",
+      "kind": "full_name",
+      "grep": true
+     },
+     {
+      "text": "Mira",
+      "kind": "given_name",
+      "grep": true
+     },
+     {
+      "text": "her",
+      "kind": "pronoun",
+      "grep": false
+     },
+     {
+      "text": "Dr. Vale",
+      "kind": "title_surname",
+      "grep": true
+     },
+     {
+      "text": "she",
+      "kind": "pronoun",
+      "grep": false
+     }
+    ],
+    "status": "active",
+    "provenance": [
+     {
+      "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+      "pageOrder": 0,
+      "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+      "quote": "Mira Vale had kept the light at Sorren Point for eleven years"
+     },
+     {
+      "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+      "pageOrder": 0,
+      "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+      "quote": "Mira Vale had kept the light at Sorren Point for eleven years, and the sea had kept her in return."
+     },
+     {
+      "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+      "pageOrder": 1,
+      "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+      "quote": "Not Mira, who of all people had the right to know"
+     }
+    ]
+   },
+   {
+    "entityId": "ent_sorren_point",
+    "canonicalName": "Sorren Point",
+    "type": "location",
+    "aliases": [
+     {
+      "text": "Sorren Point",
+      "kind": "given_name",
+      "grep": true
+     },
+     {
+      "text": "the Point",
+      "kind": "given_name",
+      "grep": true
+     }
+    ],
+    "status": "active",
+    "provenance": [
+     {
+      "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+      "pageOrder": 0,
+      "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+      "quote": "the light at Sorren Point"
+     },
+     {
+      "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+      "pageOrder": 0,
+      "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+      "quote": "Mira Vale had kept the light at Sorren Point for eleven years, and the sea had kept her in return."
+     },
+     {
+      "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+      "pageOrder": 1,
+      "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+      "quote": "out on the Point's jetty"
+     }
+    ]
+   },
+   {
+    "entityId": "ent_jonah",
+    "canonicalName": "Jonah",
+    "type": "character",
+    "aliases": [
+     {
+      "text": "Jonah",
+      "kind": "given_name",
+      "grep": true
+     },
+     {
+      "text": "he",
+      "kind": "pronoun",
+      "grep": false
+     },
+     {
+      "text": "his",
+      "kind": "pronoun",
+      "grep": false
+     }
+    ],
+    "status": "active",
+    "provenance": [
+     {
+      "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+      "pageOrder": 0,
+      "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+      "quote": "Her brother Jonah ran the supply boat on Tuesdays"
+     },
+     {
+      "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+      "pageOrder": 0,
+      "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+      "quote": "Her brother Jonah ran the supply boat on Tuesdays."
+     },
+     {
+      "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+      "pageOrder": 1,
+      "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+      "quote": "That same afternoon, out on the Point's jetty, Jonah was lashing crates"
+     }
+    ]
+   },
+   {
+    "entityId": "ent_brass_compass",
+    "canonicalName": "brass compass",
+    "type": "object",
+    "aliases": [
+     {
+      "text": "brass compass",
+      "kind": "given_name",
+      "grep": true
+     },
+     {
+      "text": "the compass",
+      "kind": "given_name",
+      "grep": true
+     },
+     {
+      "text": "compass",
+      "kind": "given_name",
+      "grep": true
+     }
+    ],
+    "status": "active",
+    "provenance": [
+     {
+      "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+      "pageOrder": 0,
+      "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+      "quote": "their father's brass compass in his coat pocket"
+     },
+     {
+      "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+      "pageOrder": 0,
+      "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+      "quote": "he carried their father's brass compass in his coat pocket the way other men carried photographs."
+     },
+     {
+      "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+      "pageOrder": 1,
+      "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+      "quote": "The brass compass leapt from his pocket, struck the stone edge-first, and shattered"
+     }
+    ]
+   },
+   {
+    "entityId": "ent_anouk",
+    "canonicalName": "Anouk",
+    "type": "character",
+    "aliases": [
+     {
+      "text": "Anouk",
+      "kind": "given_name",
+      "grep": true
+     },
+     {
+      "text": "Anouck",
+      "kind": "given_name",
+      "grep": true
+     }
+    ],
+    "status": "active",
+    "provenance": [
+     {
+      "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+      "pageOrder": 0,
+      "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+      "quote": "Anouk ran the harbor at Corver across the bay"
+     },
+     {
+      "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+      "pageOrder": 0,
+      "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+      "quote": "Anouk ran the harbor at Corver across the bay, and her weather sense was better than the government radio."
+     },
+     {
+      "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+      "pageOrder": 1,
+      "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+      "quote": "Not Anouk"
+     }
+    ]
+   },
+   {
+    "entityId": "ent_corver",
+    "canonicalName": "Corver",
+    "type": "location",
+    "aliases": [
+     {
+      "text": "Corver",
+      "kind": "given_name",
+      "grep": true
+     },
+     {
+      "text": "the streets of Corver",
+      "kind": "epithet",
+      "grep": true
+     }
+    ],
+    "status": "active",
+    "provenance": [
+     {
+      "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+      "pageOrder": 0,
+      "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+      "quote": "the harbor at Corver across the bay"
+     },
+     {
+      "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+      "pageOrder": 0,
+      "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+      "quote": "Anouk ran the harbor at Corver across the bay, and her weather sense was better than the government radio."
+     },
+     {
+      "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+      "pageOrder": 1,
+      "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+      "quote": "Selma Odiah had been the archivist at Corver for six years"
+     }
+    ]
+   },
+   {
+    "entityId": "ent_selma",
+    "canonicalName": "Selma",
+    "type": "character",
+    "aliases": [
+     {
+      "text": "Selma",
+      "kind": "given_name",
+      "grep": true
+     },
+     {
+      "text": "Selma Odiah",
+      "kind": "full_name",
+      "grep": true
+     },
+     {
+      "text": "she",
+      "kind": "pronoun",
+      "grep": false
+     },
+     {
+      "text": "Selma's",
+      "kind": "given_name",
+      "grep": true
+     }
+    ],
+    "status": "active",
+    "provenance": [
+     {
+      "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+      "pageOrder": 0,
+      "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+      "quote": "Selma's coming out Thursday"
+     },
+     {
+      "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+      "pageOrder": 0,
+      "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+      "quote": "\"Selma's coming out Thursday,\" Jonah said."
+     },
+     {
+      "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+      "pageOrder": 1,
+      "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+      "quote": "Selma Odiah had been the archivist at Corver for six years"
+     }
+    ]
+   },
+   {
+    "entityId": "ent_the_tower",
+    "canonicalName": "the tower",
+    "type": "location",
+    "aliases": [
+     {
+      "text": "the tower",
+      "kind": "given_name",
+      "grep": true
+     }
+    ],
+    "status": "active",
+    "provenance": [
+     {
+      "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+      "pageOrder": 0,
+      "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+      "quote": "turned back to the tower"
+     },
+     {
+      "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+      "pageOrder": 1,
+      "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+      "quote": "the tower"
+     },
+     {
+      "pageId": "d06594fc-c60a-491e-bdae-fccaa5368e02",
+      "pageOrder": 3,
+      "rev": "1742cd051549f47d3fcdf6c95eb282047ba65d15ab717212d6e85c18cf6e1318",
+      "quote": "Jonah went up the tower ladder"
+     }
+    ]
+   },
+   {
+    "entityId": "ent_maren_vale",
+    "canonicalName": "Maren Vale",
+    "type": "character",
+    "aliases": [
+     {
+      "text": "Maren Vale",
+      "kind": "full_name",
+      "grep": true
+     }
+    ],
+    "status": "active",
+    "provenance": [
+     {
+      "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+      "pageOrder": 1,
+      "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+      "quote": "the signature of old Maren Vale — Mira and Jonah's great-grandfather — had been faked"
+     },
+     {
+      "pageId": "ba5e32b0-9cb3-4091-a90c-5aa9b4c6b8f1",
+      "pageOrder": 7,
+      "rev": "289dd6328f31ebe656c07cdadbb1d4f3a677a59d8795b55ee47ccecbfd9741f2",
+      "quote": "Old Maren Vale's name was in the newspapers"
+     },
+     {
+      "pageId": "ba5e32b0-9cb3-4091-a90c-5aa9b4c6b8f1",
+      "pageOrder": 7,
+      "rev": "289dd6328f31ebe656c07cdadbb1d4f3a677a59d8795b55ee47ccecbfd9741f2",
+      "quote": "Old Maren Vale's name was in the newspapers"
+     }
+    ]
+   },
+   {
+    "entityId": "ent_corver_2",
+    "canonicalName": "Corver",
+    "type": "organization",
+    "aliases": [
+     {
+      "text": "Corver",
+      "kind": "given_name",
+      "grep": true
+     }
+    ],
+    "status": "active",
+    "provenance": [
+     {
+      "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+      "pageOrder": 1,
+      "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+      "quote": "Selma Odiah had been the archivist at Corver for six years"
+     }
+    ]
+   }
+  ]
+ },
+ "timeline": {
+  "version": 1,
+  "anchors": [
+   {
+    "anchorId": "t0",
+    "label": "three days, maybe four",
+    "kind": "relative",
+    "source": {
+     "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+     "pageOrder": 0,
+     "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+     "quote": "Three days, maybe four."
+    }
+   },
+   {
+    "anchorId": "t1",
+    "label": "Thursday",
+    "kind": "relative",
+    "source": {
+     "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+     "pageOrder": 1,
+     "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+     "quote": "the letter she found on Thursday"
+    }
+   },
+   {
+    "anchorId": "t2",
+    "label": "Tuesday",
+    "kind": "relative",
+    "source": {
+     "pageId": "103b3018-6129-4105-897b-eedbbb148b58",
+     "pageOrder": 2,
+     "rev": "7fecd0754632339fda857069e77297fb0bc1b4b8ee068baebdafb383c9c08565",
+     "quote": "The accident happened on the Tuesday run"
+    }
+   }
+  ],
+  "states": [
+   {
+    "stateId": "st_ent_mira_vale_appearance_eye_color",
+    "entityId": "ent_mira_vale",
+    "dimension": "appearance:eye_color",
+    "value": "grey",
+    "stability": "stable",
+    "openedAt": {
+     "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+     "pageOrder": 0,
+     "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+     "quote": "Her eyes were grey — the flat grey of harbor fog in November"
+    },
+    "closedAt": null
+   },
+   {
+    "stateId": "st_ent_mira_vale_appearance_eye_color_pinned",
+    "entityId": "ent_mira_vale",
+    "dimension": "appearance:eye_color",
+    "value": "grey",
+    "stability": "stable",
+    "openedAt": {
+     "origin": "writer",
+     "declaredAt": "2026-08-17T00:00:00.000Z",
+     "from": {
+      "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+      "pageOrder": 0,
+      "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+      "quote": "Her eyes were grey — the flat grey of harbor fog in November"
+     }
+    },
+    "closedAt": null
+   },
+   {
+    "stateId": "st_ent_mira_vale_appearance_hair",
+    "entityId": "ent_mira_vale",
+    "dimension": "appearance:hair",
+    "value": "copper, worn in a braid gone ragged at the end",
+    "stability": "dynamic",
+    "openedAt": {
+     "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+     "pageOrder": 0,
+     "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+     "quote": "her hair was copper, worn in a braid gone ragged at the end"
+    },
+    "closedAt": {
+     "pageId": "d06594fc-c60a-491e-bdae-fccaa5368e02",
+     "pageOrder": 3,
+     "rev": "1742cd051549f47d3fcdf6c95eb282047ba65d15ab717212d6e85c18cf6e1318",
+     "quote": "She had dyed her hair black in the kitchen sink on Sunday"
+    }
+   },
+   {
+    "stateId": "st_ent_mira_vale_location",
+    "entityId": "ent_mira_vale",
+    "dimension": "location",
+    "value": "Sorren Point",
+    "stability": "dynamic",
+    "openedAt": {
+     "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+     "pageOrder": 0,
+     "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+     "quote": "Mira Vale had kept the light at Sorren Point for eleven years"
+    },
+    "closedAt": null
+   },
+   {
+    "stateId": "st_ent_jonah_location",
+    "entityId": "ent_jonah",
+    "dimension": "location",
+    "value": "Sorren Point",
+    "stability": "dynamic",
+    "openedAt": {
+     "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+     "pageOrder": 0,
+     "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+     "quote": "Jonah ran the supply boat on Tuesdays"
+    },
+    "closedAt": {
+     "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+     "pageOrder": 1,
+     "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+     "quote": "out on the Point's jetty, Jonah was lashing crates"
+    }
+   },
+   {
+    "stateId": "st_ent_jonah_possession_brass_compass",
+    "entityId": "ent_jonah",
+    "dimension": "possession:brass compass",
+    "value": "carried",
+    "stability": "dynamic",
+    "openedAt": {
+     "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+     "pageOrder": 0,
+     "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+     "quote": "he carried their father's brass compass in his coat pocket"
+    },
+    "closedAt": {
+     "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+     "pageOrder": 1,
+     "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+     "quote": "The brass compass leapt from his pocket, struck the stone edge-first, and shattered"
+    }
+   },
+   {
+    "stateId": "st_ent_brass_compass_object_state",
+    "entityId": "ent_brass_compass",
+    "dimension": "object_state",
+    "value": "intact/working",
+    "stability": "stable",
+    "openedAt": {
+     "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+     "pageOrder": 0,
+     "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+     "quote": "Its needle had never once wavered from true north"
+    },
+    "closedAt": {
+     "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+     "pageOrder": 1,
+     "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+     "quote": "The brass compass leapt from his pocket, struck the stone edge-first, and shattered"
+    }
+   },
+   {
+    "stateId": "st_ent_mira_vale_location_2",
+    "entityId": "ent_mira_vale",
+    "dimension": "location",
+    "value": "the tower",
+    "stability": "dynamic",
+    "openedAt": {
+     "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+     "pageOrder": 0,
+     "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+     "quote": "turned back to the tower"
+    },
+    "closedAt": {
+     "pageId": "103b3018-6129-4105-897b-eedbbb148b58",
+     "pageOrder": 2,
+     "rev": "7fecd0754632339fda857069e77297fb0bc1b4b8ee068baebdafb383c9c08565",
+     "quote": "Mira heard the sound he made from the jetty"
+    }
+   },
+   {
+    "stateId": "st_ent_mira_vale_relationship_jonah",
+    "entityId": "ent_mira_vale",
+    "dimension": "relationship:Jonah",
+    "value": "sibling",
+    "stability": "stable",
+    "openedAt": {
+     "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+     "pageOrder": 0,
+     "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+     "quote": "Her brother Jonah ran the supply boat on Tuesdays."
+    },
+    "closedAt": {
+     "pageId": "d06594fc-c60a-491e-bdae-fccaa5368e02",
+     "pageOrder": 3,
+     "rev": "1742cd051549f47d3fcdf6c95eb282047ba65d15ab717212d6e85c18cf6e1318",
+     "quote": "Mira sent it up, and by ten the tanks were full and the storm could do its worst."
+    }
+   },
+   {
+    "stateId": "st_ent_mira_vale_relationship_selma",
+    "entityId": "ent_mira_vale",
+    "dimension": "relationship:Selma",
+    "value": "acquaintance",
+    "stability": "dynamic",
+    "openedAt": {
+     "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+     "pageOrder": 0,
+     "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+     "quote": "\"Selma's coming out Thursday,\" Jonah said."
+    },
+    "closedAt": {
+     "pageId": "425d805c-d701-49ef-a6b7-d8556bde8e1a",
+     "pageOrder": 4,
+     "rev": "e191d37df5634023a799c97bf7c1c83eb08f08ff8cdc88ff21c9128673a53e36",
+     "quote": "two women keeping a fire lit on the edge of a drowning world"
+    }
+   },
+   {
+    "stateId": "st_ent_jonah_relationship_mira_vale",
+    "entityId": "ent_jonah",
+    "dimension": "relationship:Mira Vale",
+    "value": "sibling",
+    "stability": "stable",
+    "openedAt": {
+     "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+     "pageOrder": 0,
+     "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+     "quote": "Her brother Jonah ran the supply boat on Tuesdays."
+    },
+    "closedAt": {
+     "pageId": "103b3018-6129-4105-897b-eedbbb148b58",
+     "pageOrder": 2,
+     "rev": "7fecd0754632339fda857069e77297fb0bc1b4b8ee068baebdafb383c9c08565",
+     "quote": "Jonah will sulk less if he doesn't have to watch."
+    }
+   },
+   {
+    "stateId": "st_ent_jonah_voice",
+    "entityId": "ent_jonah",
+    "dimension": "voice",
+    "value": "loud",
+    "stability": "stable",
+    "openedAt": {
+     "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+     "pageOrder": 0,
+     "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+     "quote": "laughed too loudly for a man who worked alone on water"
+    },
+    "closedAt": {
+     "pageId": "d06594fc-c60a-491e-bdae-fccaa5368e02",
+     "pageOrder": 3,
+     "rev": "1742cd051549f47d3fcdf6c95eb282047ba65d15ab717212d6e85c18cf6e1318",
+     "quote": "whistling through his teeth the way he did when the work was good."
+    }
+   },
+   {
+    "stateId": "st_ent_brass_compass_object_meaning",
+    "entityId": "ent_brass_compass",
+    "dimension": "object_meaning",
+    "value": "family heirloom",
+    "stability": "stable",
+    "openedAt": {
+     "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+     "pageOrder": 0,
+     "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+     "quote": "he carried their father's brass compass in his coat pocket the way other men carried photographs."
+    },
+    "closedAt": null
+   },
+   {
+    "stateId": "st_ent_selma_location",
+    "entityId": "ent_selma",
+    "dimension": "location",
+    "value": "Corver",
+    "stability": "dynamic",
+    "openedAt": {
+     "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+     "pageOrder": 1,
+     "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+     "quote": "Selma Odiah had been the archivist at Corver for six years"
+    },
+    "closedAt": {
+     "pageId": "425d805c-d701-49ef-a6b7-d8556bde8e1a",
+     "pageOrder": 4,
+     "rev": "e191d37df5634023a799c97bf7c1c83eb08f08ff8cdc88ff21c9128673a53e36",
+     "quote": "Selma stood in the lantern room"
+    }
+   },
+   {
+    "stateId": "st_ent_jonah_location_2",
+    "entityId": "ent_jonah",
+    "dimension": "location",
+    "value": "Sorren Point",
+    "stability": "dynamic",
+    "openedAt": {
+     "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+     "pageOrder": 1,
+     "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+     "quote": "out on the Point's jetty, Jonah was lashing crates"
+    },
+    "closedAt": {
+     "pageId": "103b3018-6129-4105-897b-eedbbb148b58",
+     "pageOrder": 2,
+     "rev": "7fecd0754632339fda857069e77297fb0bc1b4b8ee068baebdafb383c9c08565",
+     "quote": "as Jonah was wrestling the winch"
+    }
+   },
+   {
+    "stateId": "st_ent_brass_compass_object_state_2",
+    "entityId": "ent_brass_compass",
+    "dimension": "object_state",
+    "value": "shattered",
+    "stability": "dynamic",
+    "openedAt": {
+     "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+     "pageOrder": 1,
+     "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+     "quote": "The brass compass leapt from his pocket, struck the stone edge-first, and shattered"
+    },
+    "closedAt": {
+     "pageId": "fb8afb0e-ac56-46e6-ab76-9657c228f01b",
+     "pageOrder": 6,
+     "rev": "604b19540f6b7c48840c191a93ffe0239419af6662fc74d74861c1ac721fccef",
+     "quote": "the glass face clean and bright, the needle riding steady on north"
+    }
+   },
+   {
+    "stateId": "st_ent_selma_relationship_mira_vale",
+    "entityId": "ent_selma",
+    "dimension": "relationship:Mira Vale",
+    "value": "protective",
+    "stability": "dynamic",
+    "openedAt": {
+     "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+     "pageOrder": 1,
+     "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+     "quote": "Not Mira, who of all people had the right to know"
+    },
+    "closedAt": null
+   },
+   {
+    "stateId": "st_ent_jonah_object_state",
+    "entityId": "ent_jonah",
+    "dimension": "object_state",
+    "value": "shattered",
+    "stability": "dynamic",
+    "openedAt": {
+     "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+     "pageOrder": 1,
+     "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+     "quote": "The brass compass leapt from his pocket, struck the stone edge-first, and shattered"
+    },
+    "closedAt": null
+   },
+   {
+    "stateId": "st_ent_jonah_relationship_brass_compass",
+    "entityId": "ent_jonah",
+    "dimension": "relationship:brass compass",
+    "value": "attached",
+    "stability": "dynamic",
+    "openedAt": {
+     "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+     "pageOrder": 1,
+     "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+     "quote": "Then he gathered the pieces into his palm, every one, and said nothing to anyone about that either"
+    },
+    "closedAt": null
+   },
+   {
+    "stateId": "st_ent_jonah_injury",
+    "entityId": "ent_jonah",
+    "dimension": "injury",
+    "value": "three bones broken across the knuckles, one badly",
+    "stability": "dynamic",
+    "openedAt": {
+     "pageId": "103b3018-6129-4105-897b-eedbbb148b58",
+     "pageOrder": 2,
+     "rev": "7fecd0754632339fda857069e77297fb0bc1b4b8ee068baebdafb383c9c08565",
+     "quote": "Three bones broken across the knuckles, one badly."
+    },
+    "closedAt": {
+     "pageId": "d06594fc-c60a-491e-bdae-fccaa5368e02",
+     "pageOrder": 3,
+     "rev": "1742cd051549f47d3fcdf6c95eb282047ba65d15ab717212d6e85c18cf6e1318",
+     "quote": "Jonah went up the tower ladder hand over hand, both fists closing sure and strong on the rungs"
+    },
+    "expectedDurationDays": 42
+   }
+  ],
+  "elapsed": []
+ },
+ "knowledge": {
+  "version": 1,
+  "facts": [
+   {
+    "knowledgeId": "kn_001",
+    "entityId": "ent_mira_vale",
+    "proposition": "jonah_carries_compass",
+    "propositionKey": "jonah_carries_compass",
+    "polarity": "knows",
+    "learnedAt": {
+     "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+     "pageOrder": 0,
+     "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+     "quote": "he carried their father's brass compass in his coat pocket the way other men carried photographs."
+    }
+   },
+   {
+    "knowledgeId": "kn_002",
+    "entityId": "ent_mira_vale",
+    "proposition": "anouk_weather_forecast",
+    "propositionKey": "anouk_weather_forecast",
+    "polarity": "knows",
+    "learnedAt": {
+     "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+     "pageOrder": 0,
+     "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+     "quote": "\"Anouk says there's a system building past the shelf. Three days, maybe four.\""
+    },
+    "learnedHow": "told_by:Jonah"
+   },
+   {
+    "knowledgeId": "kn_003",
+    "entityId": "ent_mira_vale",
+    "proposition": "selma_visiting_thursday",
+    "propositionKey": "selma_visiting_thursday",
+    "polarity": "knows",
+    "learnedAt": {
+     "pageId": "9d1a58b7-a824-4a51-a339-b721327c9b80",
+     "pageOrder": 0,
+     "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+     "quote": "\"Selma's coming out Thursday,\" Jonah said."
+    },
+    "learnedHow": "told_by:Jonah"
+   },
+   {
+    "knowledgeId": "kn_004",
+    "entityId": "ent_selma",
+    "proposition": "harbor_deed_forged",
+    "propositionKey": "harbor_deed_forged",
+    "polarity": "knows",
+    "learnedAt": {
+     "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+     "pageOrder": 1,
+     "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+     "quote": "It said plainly what half the town had whispered for sixty years: the deed to Corver harbor had been forged."
+    },
+    "learnedHow": "read"
+   },
+   {
+    "knowledgeId": "kn_005",
+    "entityId": "ent_mira_vale",
+    "proposition": "harbor_deed_forged",
+    "propositionKey": "harbor_deed_forged",
+    "polarity": "unaware",
+    "learnedAt": {
+     "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+     "pageOrder": 1,
+     "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+     "quote": "She told no one. Not the council. Not Anouk. Not Mira, who of all people had the right to know."
+    }
+   },
+   {
+    "knowledgeId": "kn_006",
+    "entityId": "ent_anouk",
+    "proposition": "harbor_deed_forged",
+    "propositionKey": "harbor_deed_forged",
+    "polarity": "unaware",
+    "learnedAt": {
+     "pageId": "586eb052-8ef9-4275-8a3e-573e134902b6",
+     "pageOrder": 1,
+     "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+     "quote": "She told no one. Not the council. Not Anouk. Not Mira, who of all people had the right to know."
+    }
+   },
+   {
+    "knowledgeId": "kn_007",
+    "entityId": "ent_mira_vale",
+    "proposition": "jonah_carries_compass",
+    "propositionKey": "jonah_carries_compass",
+    "polarity": "knows",
+    "learnedAt": {
+     "pageId": "103b3018-6129-4105-897b-eedbbb148b58",
+     "pageOrder": 2,
+     "rev": "7fecd0754632339fda857069e77297fb0bc1b4b8ee068baebdafb383c9c08565",
+     "quote": "Mira heard the sound he made from the jetty"
+    }
+   },
+   {
+    "knowledgeId": "kn_008",
+    "entityId": "ent_anouk",
+    "proposition": "jonah_carries_compass",
+    "propositionKey": "jonah_carries_compass",
+    "polarity": "knows",
+    "learnedAt": {
+     "pageId": "103b3018-6129-4105-897b-eedbbb148b58",
+     "pageOrder": 2,
+     "rev": "7fecd0754632339fda857069e77297fb0bc1b4b8ee068baebdafb383c9c08565",
+     "quote": "Anouk logged the accident in the harbor book"
+    }
+   }
+  ]
+ },
+ "pov": {
+  "version": 1,
+  "pages": {
+   "9d1a58b7-a824-4a51-a339-b721327c9b80": {
+    "pageOrder": 0,
+    "rev": "7a3f0c8ec545f70ebbb9dd95858b8c7f9dd339b5d7621f92e7a75d6efcb2a2d9",
+    "pov": {
+     "mode": "third_limited",
+     "confidence": 0.9,
+     "character": "ent_mira_vale"
+    },
+    "tense": {
+     "value": "past",
+     "confidence": 1
+    }
+   },
+   "586eb052-8ef9-4275-8a3e-573e134902b6": {
+    "pageOrder": 1,
+    "rev": "4deb29377d654bbb99b5edd0a5cc01404e2bb311f301225f3ea28fd387f5ef2f",
+    "pov": {
+     "mode": "third_omniscient",
+     "confidence": 0.9
+    },
+    "tense": {
+     "value": "past",
+     "confidence": 1
+    }
+   },
+   "103b3018-6129-4105-897b-eedbbb148b58": {
+    "pageOrder": 2,
+    "rev": "7fecd0754632339fda857069e77297fb0bc1b4b8ee068baebdafb383c9c08565",
+    "pov": {
+     "mode": "third_limited",
+     "confidence": 0.9,
+     "character": "ent_mira_vale"
+    },
+    "tense": {
+     "value": "past",
+     "confidence": 1
+    }
+   }
+  }
+ }
+}

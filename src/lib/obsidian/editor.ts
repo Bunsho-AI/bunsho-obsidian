@@ -36,3 +36,15 @@ export function activeNotePosition(app: App): { path: string; offset: number | n
   }
   return { path: file.path, offset: null };
 }
+
+/** The note's editor text and cursor, as the writer has it: the pane they were last in when several show the note. Null when none is open for editing, whose cursor would mean nothing. */
+export function noteCursor(app: App, path: string): { text: string; cursor: number } | null {
+  const recent = app.workspace.getMostRecentLeaf()?.view;
+  const views = [recent, ...app.workspace.getLeavesOfType("markdown").map((leaf) => leaf.view)];
+  for (const view of views) {
+    if (view instanceof MarkdownView && view.file?.path === path && view.getMode() === "source") {
+      return { text: view.editor.getValue().replace(/\r\n?/gu, "\n"), cursor: view.editor.posToOffset(view.editor.getCursor()) };
+    }
+  }
+  return null;
+}

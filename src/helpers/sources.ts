@@ -125,7 +125,7 @@ function noteItems(note: NoteInput, projection: Projection, source: SourceChoice
   return items;
 }
 
-const noteIdOf = (itemId: string): string => itemId.split("#", 1)[0];
+export const noteIdOf = (itemId: string): string => itemId.split("#", 1)[0];
 
 /** Every item of the source in natural order, and the notes with nothing to read. */
 export function buildItems(notes: readonly NoteInput[], source: SourceChoice): { items: ReadingItem[]; skipped: string[] } {
