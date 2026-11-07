@@ -1,11 +1,16 @@
 /** Shared plugin types: persisted data and the controller's state, read by pages and passed down to components. */
-import type { Chapter, SkippedNote } from "@/helpers/chapters";
+import type { PageMeta, PlannedItem, SavedPlan, SourceChoice } from "@/helpers/sources";
 import type { ProjectState } from "@/helpers/project";
 import type { PipelineV3Health } from "@/lib/contract/pipelineV3.types";
 import type { ReviewOutcome } from "@/lib/services/review/reviewService";
 
 export interface PluginData {
-  manuscriptFolder: string;
+  /** What the writer picked: null until they do. Bunsho never guesses a folder. */
+  source: SourceChoice | null;
+  /** The reading plan the writer confirmed for `source`. */
+  plan: SavedPlan | null;
+  /** Note path -> a stable id, moved on rename, so a finding and a plan survive one. */
+  noteIds: Record<string, string>;
   engineUrl: string;
   /** Local development only (engine with AUTH_OPTIONAL=true). Shown in settings only for a localhost engine. */
   devUid: string;
@@ -16,9 +21,24 @@ export interface PluginData {
 }
 
 export type Scan =
-  | { status: "no_folder" }
-  | { status: "no_notes" }
-  | { status: "ready"; chapters: Chapter[]; skipped: SkippedNote[]; chars: number; words: number; snapshotId: string };
+  /** Nothing picked yet. */
+  | { status: "no_source" }
+  /** What was picked is no longer in the vault. */
+  | { status: "missing"; source: SourceChoice }
+  /** Picked, with no text in it yet. */
+  | { status: "empty"; source: SourceChoice }
+  | {
+    status: "ready"; source: SourceChoice;
+    /** The plan's lines, in the writer's order. */
+    items: PlannedItem[];
+    /** The reading plan differs from what the writer last confirmed. */
+    needsConfirming: boolean;
+    /** Exactly what a check would send. Reading units are never shown. */
+    pages: PageMeta[];
+    chars: number; words: number; snapshotId: string;
+    /** Notes with nothing to read. */
+    skipped: string[];
+  };
 
 export type Phase =
   | { kind: "idle" }
@@ -32,7 +52,7 @@ export interface Account {
   balance: number | null;
   health: PipelineV3Health | null;
   problem: string | null;
-  /** The Free tier's one-project rule for this manuscript (helpers/project.ts). */
+  /** The Free tier's one-project rule for this vault (helpers/project.ts). */
   project: ProjectState;
   registeredName: string | null;
 }

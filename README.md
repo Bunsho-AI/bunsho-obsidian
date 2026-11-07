@@ -14,21 +14,21 @@ Find continuity errors in your novel: a character's eye colour that changes, a t
 - A [Bunsho](https://bunsho.io) account (sign in with Google). Checks use your Bunsho credits, the same balance as the desktop app. New accounts start with a free allowance.
 - Obsidian 1.11.4 or later on desktop (macOS, Windows or Linux). The plugin is desktop-only.
 
-## Your manuscript layout
+## Your manuscript, in any layout
 
-Bunsho reads one layout. There is no other.
+Bunsho works with the way you already keep your book. Pick a folder or a single note:
 
-```
-Manuscript/
-  01 The Arrival.md
-  02 The Letter.md
-  03 ...
-```
+- One note per chapter or scene, in any number of nested folders.
+- One long note holding the whole book, with or without headings.
 
-- One note per chapter, directly inside the manuscript folder (the folder name is a setting; the default is `Manuscript`).
-- Chapters are read in name order, with numbers compared as numbers (`2` before `10`), so number your chapter notes.
-- One paragraph per line.
+Before your first check, Bunsho shows a **reading plan**: exactly what it will read, in which order, and for how many credits. Move anything that is out of order and untick anything that is not story, such as research notes. Your plan is saved, and shown again only when the notes change. Notes marked `wordcount: false` or tagged `#exclude-from-word-count` start unticked.
+
+- Notes are first listed by name, with numbers compared as numbers (`2` before `10`), folder by folder.
+- A long note is listed by its headings, so a section can be left out.
+- Each line of a note counts as one paragraph.
 - Frontmatter, `%%comments%%`, embeds and markdown marks are not part of the text that is checked.
+
+Findings always point to your own note and passage.
 
 ## Using it
 
@@ -36,8 +36,13 @@ The plugin does nothing until you sign in: the panel and settings show only the 
 
 1. Install and enable the plugin, then open **Bunsho** from the ribbon or the command palette.
 2. Sign in with Google.
-3. Press **Check manuscript** (or run it from the command palette). Bunsho shows the credit price and asks before anything is spent. A check takes a few minutes; keep Obsidian open while it runs.
-4. Review findings. **Go to passage** selects the quoted text in your note; **Dismiss** hides a finding you have decided is fine.
+3. Choose the folder or note that holds your book, and confirm the reading plan.
+4. Press **Check manuscript** (or run it from the command palette). Bunsho shows the credit price and asks before anything is spent. A check takes a few minutes; keep Obsidian open while it runs.
+5. Review findings. Click a passage to select it in your note; **Not an error** hides a finding you have decided is fine.
+
+Bunsho uses AI and can make mistakes. Check findings against your story.
+
+On the free plan your vault is your one project. You can change what it reads at any time, and you can switch your free project to another vault as often as you like.
 
 Checking only ever runs when you press the button. Writing is never metered.
 
@@ -45,7 +50,7 @@ Checking only ever runs when you press the button. Writing is never metered.
 
 - **Account required.** Checking needs a Bunsho account and credits.
 - **Payment.** A check is paid for with Bunsho credits. Credits are bought at bunsho.io, not inside the plugin.
-- **Network use.** When you confirm a check, the plugin sends the text of your chapter notes to the Bunsho service (`engine.bunsho.io`) over an encrypted connection to be checked, and receives the findings. While you are signed in it also reads your credit balance and the current price from the Bunsho service (when Obsidian starts, when the panel opens and after a check), and it contacts Google and Firebase to sign you in and keep you signed in. Sign-in opens a page served from your own computer in your browser; that page loads Firebase's sign-in code from Google. Requests carry a random install id generated on this machine and the plugin version; the install id protects the free starter allowance from abuse. Your notes are not sent at any other time.
+- **Network use.** When you confirm a check, the plugin sends the text of the notes and sections on your reading plan to the Bunsho service (`engine.bunsho.io`) over an encrypted connection to be checked, and receives the findings. While you are signed in it also reads your credit balance and the current price from the Bunsho service (when Obsidian starts, when the panel opens and after a check), and it contacts Google and Firebase to sign you in and keep you signed in. Sign-in opens a page served from your own computer in your browser; that page loads Firebase's sign-in code from Google. Requests carry a random install id generated on this machine and the plugin version; the install id protects the free starter allowance from abuse. Your notes are not sent at any other time.
 - **Telemetry.** The plugin sends no analytics or telemetry. The Bunsho service keeps the account and billing records needed to charge credits; see the privacy policy at https://bunsho.io/privacy.
 - **Stored on your machine.** Findings and dismissals live in the plugin's `data.json`. Your sign-in is kept in Obsidian's secret storage, never in `data.json`.
 - **Open source.** The plugin is a thin client under the MIT license. Detection runs in the Bunsho service.

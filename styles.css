@@ -131,3 +131,30 @@ button.bunsho-google:hover { background: #f8f9fa; box-shadow: 0 1px 2px rgba(60,
 .bunsho-google-logo { display: inline-flex; width: 20px; height: 20px; }
 .bunsho-google-logo svg { width: 100%; height: 100%; }
 .bunsho-muted { color: var(--text-muted); font-size: var(--font-ui-small); }
+
+/* What is being read, and the way to change it */
+.bunsho-source { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 8px; margin-bottom: 12px; }
+.bunsho-source-name { overflow-wrap: anywhere; }
+.bunsho-alert-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+/* The panel is a column so the AI notice stays at the bottom, as on desktop */
+.bunsho-panel { display: flex; flex-direction: column; }
+.bunsho-panel > * { flex: none; }
+.bunsho-ai-notice {
+  /* Obsidian's status bar floats over the bottom right of the window */
+  position: sticky; bottom: 0; margin-top: auto; padding: 8px 12px 32px; font-size: 11px; line-height: 1.4; color: var(--text-muted);
+  background: var(--background-secondary); border-top: 1px solid var(--background-modifier-border);
+}
+
+/* Reading plan */
+.bunsho-plan-head { font-size: 13px; line-height: 1.5; color: var(--text-muted); margin-bottom: 10px; }
+.bunsho-plan-list { max-height: min(50vh, 420px); overflow-y: auto; border: 1px solid var(--background-modifier-border); border-radius: 4px; }
+.bunsho-plan-row { display: flex; align-items: center; gap: 6px; padding: 2px 6px 2px 8px; border-bottom: 1px solid var(--background-modifier-border); }
+.bunsho-plan-row:last-child { border-bottom: none; }
+.bunsho-plan-row.is-out .bunsho-plan-name { color: var(--text-faint); text-decoration: line-through; }
+.bunsho-plan-label { display: flex; flex: 1 1 auto; min-width: 0; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.bunsho-plan-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bunsho-plan-row .bunsho-fact { font-family: var(--font-monospace); font-size: 11px; color: var(--text-muted); flex: none; }
+button.bunsho-plan-move { flex: none; padding: 2px 4px; }
+button.bunsho-plan-move:disabled { opacity: 0.3; cursor: default; }
+.bunsho-plan-summary { margin-top: 10px; font-size: 13px; line-height: 1.5; }

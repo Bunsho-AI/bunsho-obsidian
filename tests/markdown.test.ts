@@ -9,9 +9,28 @@ describe("projectMarkdown", () => {
     expect(p.toSource(24)).toBe(24);
   });
 
-  it("drops frontmatter, comments, embeds and rules", () => {
-    const raw = "---\ntitle: One\n---\nShe ran.\n%%note to self%%\n![[map.png]]\n***\nHe stayed.";
-    expect(projectMarkdown(raw).text).toBe("She ran.\n\n\n\nHe stayed.");
+  it("drops frontmatter, comments and embeds", () => {
+    const raw = "---\ntitle: One\n---\nShe ran.\n%%note to self%%\n![[map.png]]\nHe stayed.";
+    expect(projectMarkdown(raw).text).toBe("She ran.\n\n\nHe stayed.");
+  });
+
+  it("keeps rule lines, which the engine reads as scene breaks, and keeps them mappable", () => {
+    for (const rule of ["---", "***", "___", "* * *"]) {
+      const raw = `She ran.\n${rule}\nHe stayed.`;
+      const p = projectMarkdown(raw);
+      expect(p.text).toBe(raw);
+      expect(p.toSource(p.text.indexOf("He"))).toBe(raw.indexOf("He"));
+    }
+  });
+
+  it("does not take prose between two rules at the top of a note for frontmatter", () => {
+    const raw = "---\nThe tide came in before anyone woke.\n---\nShe ran.";
+    expect(projectMarkdown(raw).text).toBe(raw);
+  });
+
+  it("still reads real frontmatter with lists, comments and nesting", () => {
+    const raw = "---\ntitle: One\n# a comment\ntags:\n  - draft\n- loose\nnote: 第一章\n---\nShe ran.";
+    expect(projectMarkdown(raw).text).toBe("She ran.");
   });
 
   it("shows link aliases or targets and keeps them mappable", () => {
@@ -48,5 +67,16 @@ describe("projectMarkdown", () => {
   it("works for any script (no word lists)", () => {
     const p = projectMarkdown("# 第一章\n彼女は**黙って**部屋を出た。");
     expect(p.text).toBe("第一章\n彼女は黙って部屋を出た。");
+  });
+});
+
+describe("headings", () => {
+  it("finds each heading's level and offset in the projected text", () => {
+    const projection = projectMarkdown("Intro.\n# One\nText.\n### Deep\nMore.");
+    expect(projection.headings.map((h) => [h.level, projection.text.slice(h.offset).split("\n")[0]])).toEqual([[1, "One"], [3, "Deep"]]);
+  });
+  it("reads no words, and a hash without a space is not a heading", () => {
+    expect(projectMarkdown("#tag\nText.").headings).toEqual([]);
+    expect(projectMarkdown("# 第一章\n本文。").headings).toHaveLength(1);
   });
 });

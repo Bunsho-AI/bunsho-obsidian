@@ -183,6 +183,8 @@ export interface PipelineV3Health {
   jevEndpoint: string;
   limits: { maxPageChars: number; maxBookChars: number };
   pricing: PipelineV3Pricing;
+  /** The engine accepts `part` on pages. Older engines omit it and refuse the field. */
+  readingParts: boolean;
 }
 
 /**
@@ -212,6 +214,8 @@ export interface PipelineV3StartPage {
   /** The page's content hash (pageContentHash of the projection); citations carry it back. */
   rev: string;
   send: PipelineV3PageSend;
+  /** Present when this page was cut from a longer section (protocol.ts partSchema). An engine without readingParts refuses it. */
+  part?: { sourceId: string; sourceOrder: number; index: number; of: number };
 }
 
 /** Client `start` payload (protocol.ts startSchema). */
