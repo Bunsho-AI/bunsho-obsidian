@@ -41,6 +41,20 @@ export function findings(start, pages) {
   return issues;
 }
 
+/** A read per page, as the engine's `read` frame: one fact and one cast record for each eye colour on the page. */
+export function readsOf(start, pages) {
+  return start.pages.map((meta) => {
+    const text = pages.get(meta.pageId) ?? "";
+    const facts = [...text.matchAll(EYES)].map((match, i) => ({
+      id: `${meta.pageId}#${i}`, pageId: meta.pageId, order: meta.order, span: { start: match.index, end: match.index + match[0].length }, quote: match[0], paragraph: 0,
+      subject: "Mira", attribute: "eye colour", value: match[1].toLowerCase(), dimension: "appearance:eye_color", counterpart: null, status: "fact", kind: "trait",
+      statement: match[0], question: "What colour are her eyes?", framing: "narration", speaker: null, textMarksUntrue: false,
+    }));
+    const cast = facts.length ? [{ pageId: meta.pageId, order: meta.order, name: "Mira", kind: "person", names: [{ name: "Mira", proper: true }], role: "", introducedAliases: [] }] : [];
+    return { pageId: meta.pageId, order: meta.order, rev: meta.rev, facts, cast, narration: { person: "third", povCharacter: "", tense: "past" }, povBreaks: [], droppedFacts: 0 };
+  });
+}
+
 export function startMockEngine({ port = 0, balance = 500, tamper = false, failWith = null, holdOpen = false, paid = false, registered = null, starter = 0, readingParts = true } = {}) {
   const requests = [];
   const starts = [];
@@ -100,8 +114,12 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
         if (step < stages.length) return socket.send(frame("progress", { stage: stages[step++], done: 1, total: 1 }));
         clearInterval(tick);
         const issues = findings(start, pages);
+        const reads = readsOf(start, pages);
+        for (const read of reads) socket.send(frame("read", read));
+        const inBook = reads.filter((read) => read.facts.length).map((read) => read.order);
+        const cast = inBook.length ? [{ id: "c0", name: "Mira", kind: "person", names: ["Mira"], properNames: ["Mira"], aliases: [], chapters: inBook, roles: [], introduced: [] }] : [];
         if (tamper) for (const issue of issues) issue.citations[tamper === "prior" ? 0 : 1].source_ref.end += 1; // cites text that was never sent
-        socket.send(frame("result", { reviewId: start.reviewId, policyId: start.policyId, readPolicyId: start.readPolicyId, issues, cast: [],
+        socket.send(frame("result", { reviewId: start.reviewId, policyId: start.policyId, readPolicyId: start.readPolicyId, issues, cast,
           stats: { chapters: start.pages.length } }));
         if (!holdOpen) socket.close(1000); // holdOpen: leave closing to the client, as the real engine's timing can
 

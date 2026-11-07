@@ -4,7 +4,7 @@ import { locateQuote } from "@/helpers/locate";
 import type { EngineIssueCitation } from "@/lib/contract/engine.types";
 import { projectMarkdown } from "@/utils/markdown";
 
-export async function selectPassage(app: App, path: string, pageOffset: number, citation: EngineIssueCitation): Promise<void> {
+export async function selectPassage(app: App, path: string, pageOffset: number, citation: Pick<EngineIssueCitation, "quoted_text" | "source_ref">): Promise<void> {
   const file = app.vault.getFileByPath(path);
   if (!file) { new Notice("That note has been moved or deleted since the check."); return; }
   const leaf = app.workspace.getLeaf(false);

@@ -17,6 +17,9 @@ import { BrandHeader } from "@/molecules/BrandHeader";
 import { EmptyState } from "@/molecules/EmptyState";
 import { StatusRow } from "@/molecules/StatusRow";
 import { FindingsList, type FindingItem } from "@/organisms/FindingsList";
+import { WorldList } from "@/organisms/WorldList";
+import { PanelTabs } from "@/molecules/PanelTabs";
+import type { WorldEntity, WorldFilter } from "@/helpers/world";
 import { SourcePrompt } from "@/organisms/SourcePrompt";
 import { SignInPanel } from "@/organisms/SignInPanel";
 import { formatNumber, formatShortDate } from "@/utils/format";
@@ -33,6 +36,16 @@ const STAGE_LABEL: Record<string, string> = {
 export class ContinuityView extends ItemView {
   private showDismissed = false;
   private readonly expanded = new Set<string>();
+  private tab: "findings" | "world" = "findings";
+  private worldFilter: WorldFilter = "people";
+  private worldSearch = "";
+  private readonly worldOpen = new Set<string>();
+  private readonly worldHistory = new Set<string>();
+  /** Which World the open cards belong to: cast ids are only meaningful within one check. */
+  private worldShown: readonly WorldEntity[] | null = null;
+  private composing = false;
+  private renderWaiting = false;
+  private resetScroll = false;
 
   constructor(leaf: WorkspaceLeaf, private readonly controller: ContinuityController) { super(leaf); }
 
@@ -43,7 +56,15 @@ export class ContinuityView extends ItemView {
   async onOpen(): Promise<void> { this.render(); await this.controller.refresh(); }
 
   render(): void {
+    if (this.composing) { this.renderWaiting = true; return; } // rebuilding the field would end the writer's IME composition
     const root = this.contentEl;
+    // A re-render must not take the cursor or the keyboard focus away from where the writer is.
+    const active = root.ownerDocument.activeElement;
+    const search = root.querySelector<HTMLInputElement>(".bunsho-world-search");
+    const caret = search && active === search ? [search.selectionStart, search.selectionEnd] as const : null;
+    const focusKey = active && root.contains(active) ? active.getAttribute("data-focus-key") : null;
+    const scroll = this.resetScroll ? 0 : root.scrollTop;
+    this.resetScroll = false;
     root.empty();
     root.addClass("bunsho-panel");
     const c = this.controller;
@@ -58,6 +79,14 @@ export class ContinuityView extends ItemView {
     if (!this.renderAlert(body)) this.renderContent(body);
     // Like the desktop's Continuity tab: one quiet line, always there, never a popup.
     AiNotice(root);
+    root.scrollTop = scroll;
+    if (caret) {
+      const field = root.querySelector<HTMLInputElement>(".bunsho-world-search");
+      field?.focus({ preventScroll: true });
+      field?.setSelectionRange(caret[0], caret[1]);
+    } else if (focusKey) {
+      root.querySelector<HTMLElement>(`[data-focus-key="${root.ownerDocument.defaultView?.CSS.escape(focusKey) ?? ""}"]`)?.focus({ preventScroll: true });
+    }
   }
 
   private renderContent(body: HTMLElement): void {
@@ -65,7 +94,8 @@ export class ContinuityView extends ItemView {
     const { scan } = c;
     if (scan.status === "ready") {
       this.renderSource(body, scan.source.kind === "folder" && scan.source.path === "/" ? "Whole vault" : scan.source.path);
-      this.renderFindings(body);
+      PanelTabs(body, { active: this.tab, onSelect: (tab) => { this.tab = tab; this.resetScroll = true; this.render(); }, tabs: [{ id: "findings", label: "Findings" }, { id: "world", label: "World" }] });
+      if (this.tab === "world") this.renderWorld(body); else this.renderFindings(body);
       return;
     }
     SourcePrompt(body, { scan, onChoose: () => void c.chooseSource() });
@@ -163,6 +193,36 @@ export class ContinuityView extends ItemView {
         noun: c.noun(review.coverage.sources.length), unreadLabels: review.coverage.sources.filter((source) => review.coverage.unreadSources.includes(source.id)).map((source) => source.label) },
       showDismissed: this.showDismissed,
       onToggleShowDismissed: () => { this.showDismissed = !this.showDismissed; this.render(); },
+    });
+  }
+
+  private renderWorld(body: HTMLElement): void {
+    const c = this.controller;
+    const entities = c.worldEntities();
+    if (!entities) {
+      const box = EmptyState(body, { title: "Your story's world",
+        body: "After a check, Bunsho lists your people, places and things, with the passage each fact comes from. It costs nothing extra." });
+      if (c.phase.kind === "idle" || c.phase.kind === "error") FillButton(box, { label: this.checkLabel(), onClick: () => void c.check() });
+      return;
+    }
+    if (entities !== this.worldShown) {
+      this.worldShown = entities;
+      this.worldOpen.clear();
+      this.worldHistory.clear();
+    }
+    const toggle = (set: Set<string>, id: string) => { if (!set.delete(id)) set.add(id); this.render(); };
+    WorldList(body, {
+      entities, filter: this.worldFilter, search: this.worldSearch, expanded: this.worldOpen, history: this.worldHistory,
+      gaps: c.worldGaps(), factNote: (row) => c.factNote(row),
+      onFilter: (filter) => { this.worldFilter = filter; this.resetScroll = true; this.render(); },
+      onSearch: (search) => { this.worldSearch = search; },
+      onComposing: (composing) => {
+        this.composing = composing;
+        if (!composing && this.renderWaiting) { this.renderWaiting = false; this.render(); }
+      },
+      onToggle: (id) => toggle(this.worldOpen, id),
+      onToggleHistory: (id) => toggle(this.worldHistory, id),
+      onGo: (row) => void c.jumpToFact(row),
     });
   }
 

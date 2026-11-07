@@ -4,7 +4,7 @@ import { buildUnits, snapshotId, type PageMeta, type PlannedItem, type SourceCho
 import { PipelineV3Client, type PipelineV3ReviewCallbacks } from "@/lib/contract/pipelineV3Client";
 import type { EngineIssue } from "@/lib/contract/engine.types";
 import { groundIssues, type GroundingPage } from "@/lib/contract/grounding";
-import type { PipelineV3Health, PipelineV3Result } from "@/lib/contract/pipelineV3.types";
+import type { CastMember, PipelineV3Health, PipelineV3Result } from "@/lib/contract/pipelineV3.types";
 
 /** What this review read, in the writer's terms: never reading units. */
 export interface ReviewCoverage {
@@ -37,6 +37,8 @@ export interface RunReviewInput {
   /** The price the writer saw; the engine refuses a review that would cost more. */
   maxCredits?: number;
   callbacks?: PipelineV3ReviewCallbacks;
+  /** The book's cast, for the World tab. */
+  onCast?: (cast: CastMember[]) => void;
   signal?: AbortSignal;
 }
 
@@ -61,6 +63,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewOutcome> {
     { start, pages: units.map((u) => ({ pageId: u.pageId, text: u.text })), passages: [] },
     input.callbacks, input.signal);
 
+  input.onCast?.(result.cast);
   const grounding = new Map<string, GroundingPage>(units.map((u) => [u.pageId, { pageId: u.pageId, pageOrder: u.order, rev: u.rev, text: u.text }]));
   const grounded = groundIssues(result.issues, snapshot, grounding);
   const unread = new Set(result.unreadPages ?? []);

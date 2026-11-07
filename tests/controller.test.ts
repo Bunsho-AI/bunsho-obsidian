@@ -15,26 +15,36 @@ interface Setup {
   notes: Record<string, string>;
   host?: Partial<ControllerHost>;
   read?: (path: string, text: string) => Promise<string>;
+  world?: Iterable<[string, string]>;
+  data?: Record<string, unknown>;
+  failWrite?: boolean;
 }
 
-async function setup({ notes, host = {}, read }: Setup) {
+async function setup({ notes, host = {}, read, world = [], data: savedData = {}, failWrite = false }: Setup) {
   engine = await startMockEngine({ balance: 100_000 });
   const files = () => Object.keys(notes).map((path) => ({ path, basename: path.split("/").pop()!.replace(/\.md$/u, ""), extension: "md" }));
+  const stored = new Map<string, string>(world);
   const app = {
     secretStorage: { getSecret: () => "", setSecret: () => undefined },
     vault: {
       getName: () => "Vault", getMarkdownFiles: files, getAllLoadedFiles: () => [],
       getFileByPath: (path: string) => (notes[path] === undefined ? null : { path }),
       getFolderByPath: (path: string) => (Object.keys(notes).some((n) => n.startsWith(`${path}/`)) ? { path } : null),
+      adapter: {
+        exists: (path: string) => Promise.resolve(stored.has(path)),
+        read: (path: string) => Promise.resolve(stored.get(path) ?? ""),
+        write: (path: string, text: string) => { if (failWrite) return Promise.reject(new Error("disk")); stored.set(path, text); return Promise.resolve(); },
+        remove: (path: string) => { stored.delete(path); return Promise.resolve(); },
+      },
       read: (file: { path: string }) => (read ? read(file.path, notes[file.path]) : Promise.resolve(notes[file.path])),
     },
     workspace: { getLeavesOfType: () => [] },
     metadataCache: { getFileCache: () => null },
   };
   const saved: PluginData[] = [];
-  let data: unknown = { engineUrl: `http://127.0.0.1:${engine.port}`, devUid: "test", source: FOLDER, workspaceId: "w", installId: "i" };
+  let data: unknown = { engineUrl: `http://127.0.0.1:${engine.port}`, devUid: "test", source: FOLDER, workspaceId: "w", installId: "i", ...savedData };
   const controller = new ContinuityController({
-    app: app as never, version: "0.1.0", loadData: () => Promise.resolve(data),
+    app: app as never, version: "0.1.0", dir: "plugins/bunsho", loadData: () => Promise.resolve(data),
     saveData: (next) => { data = next; saved.push(next); return Promise.resolve(); },
     openPanel: () => Promise.resolve(), changed: () => undefined,
     confirmCheck: (): Promise<CheckAnswer> => Promise.resolve("check"),
@@ -44,7 +54,7 @@ async function setup({ notes, host = {}, read }: Setup) {
     ...host,
   });
   await controller.load();
-  return { controller, saved, notes };
+  return { controller, saved, notes, stored, data: () => data };
 }
 
 /** Confirms a plan first, so the next check goes straight to the price. */
@@ -195,6 +205,176 @@ describe("recovery", () => {
   });
 });
 
+describe("the World tab", () => {
+  const BOOK = { "Book/a.md": "Her eyes were green.", "Book/b.md": "Her eyes were brown." };
+
+  it("fills from the check, with no second charge, and keeps the first value of what lasts", async () => {
+    const { controller, stored } = await setup({ notes: { ...BOOK } });
+    await withConfirmedPlan(controller);
+    expect(controller.worldEntities()).toBeNull();
+    await controller.check();
+    const [mira] = controller.worldEntities()!;
+    expect(mira.name).toBe("Mira");
+    expect(mira.rows.map((r) => `${r.label}: ${r.value}`)).toEqual(["Eye colour: green"]);
+    expect(engine!.starts).toHaveLength(1);
+    expect(stored.has("plugins/bunsho/world.json")).toBe(true);
+  });
+
+  it("is still there after closing and reopening", async () => {
+    const first = await setup({ notes: { ...BOOK } });
+    await withConfirmedPlan(first.controller);
+    await first.controller.check();
+    const saved = first.data() as Record<string, unknown>;
+    const stored = [...first.stored];
+    await engine!.close();
+    const second = await setup({ notes: { ...BOOK }, world: stored, data: { ...saved, engineUrl: "http://127.0.0.1:1" } });
+    expect(second.controller.worldEntities()?.[0].name).toBe("Mira");
+  });
+
+  it("marks a fact when its page changes after the check", async () => {
+    const notes = { ...BOOK };
+    const { controller } = await setup({ notes });
+    await withConfirmedPlan(controller);
+    await controller.check();
+    const row = controller.worldEntities()![0].rows[0];
+    expect(controller.factNote(row)).toBeNull();
+    notes["Book/a.md"] = "Her eyes were green, and more.";
+    await controller.refreshScan();
+    expect(controller.factNote(row)).toBe("edited since the check");
+  });
+
+  it("says a fact's page was left out, not edited, when the writer unticks it later", async () => {
+    let excludeFirst = false;
+    const { controller } = await setup({ notes: { ...BOOK }, host: { reviewPlan: (r) => Promise.resolve(planOf(r, excludeFirst ? [r.items[0].id] : [])) } });
+    await withConfirmedPlan(controller);
+    await controller.check();
+    const row = controller.worldEntities()![0].rows[0];
+    excludeFirst = true;
+    await controller.editPlan();
+    expect(controller.factNote(row)).toBe("left out of the reading plan since the check");
+  });
+
+  it("signing out during a check keeps nothing, and leaves the panel free", async () => {
+    const { controller, stored, data } = await setup({ notes: { ...BOOK } });
+    await withConfirmedPlan(controller);
+    const run = controller.check();
+    while (controller.phase.kind !== "checking") await new Promise((done) => setTimeout(done, 5));
+    await controller.signOut();
+    await run;
+    expect(stored.has("plugins/bunsho/world.json")).toBe(false);
+    expect((data() as PluginData).lastReview).toBeNull();
+    expect(controller.worldEntities()).toBeNull();
+    expect(controller.phase.kind).toBe("idle");
+  });
+
+  it("still removes the file when signing out fails partway", async () => {
+    const { controller, stored } = await setup({ notes: { ...BOOK } });
+    await withConfirmedPlan(controller);
+    await controller.check();
+    const tokens = (controller as unknown as { tokens: { signOut(): Promise<void> } }).tokens;
+    tokens.signOut = () => Promise.reject(new Error("keychain"));
+    await expect(controller.signOut()).rejects.toThrow("keychain");
+    expect(stored.has("plugins/bunsho/world.json")).toBe(false);
+  });
+
+  it("does not show an older World under a newer check of the same text", async () => {
+    const first = await setup({ notes: { ...BOOK } });
+    await withConfirmedPlan(first.controller);
+    await first.controller.check();
+    const saved = first.data() as PluginData;
+    const stored = [...first.stored];
+    await engine!.close();
+    const newer = { ...saved, lastReview: { ...saved.lastReview!, checkedAt: saved.lastReview!.checkedAt + 1000 } };
+    const second = await setup({ notes: { ...BOOK }, world: stored, data: newer as unknown as Record<string, unknown> });
+    expect(second.controller.worldEntities()).toBeNull();
+  });
+
+  it("names what the check could not read", async () => {
+    const first = await setup({ notes: { ...BOOK } });
+    await withConfirmedPlan(first.controller);
+    await first.controller.check();
+    expect(first.controller.worldGaps()).toEqual([]);
+    const saved = first.data() as PluginData;
+    const path = "plugins/bunsho/world.json";
+    const file = JSON.parse(first.stored.get(path)!) as { reads: unknown[] };
+    file.reads = file.reads.slice(1);
+    await engine!.close();
+    const second = await setup({ notes: { ...BOOK }, world: [[path, JSON.stringify(file)]], data: saved as unknown as Record<string, unknown> });
+    expect(second.controller.worldGaps()).toEqual(["a"]);
+  });
+
+  it("treats a damaged cast as no World, rather than breaking the panel", async () => {
+    const first = await setup({ notes: { ...BOOK } });
+    await withConfirmedPlan(first.controller);
+    await first.controller.check();
+    const saved = first.data() as PluginData;
+    const path = "plugins/bunsho/world.json";
+    for (const cast of [[null], [{ id: "x", names: 5 }], "nope"]) {
+      const file = { ...(JSON.parse(first.stored.get(path)!) as object), cast };
+      await engine!.close();
+      const second = await setup({ notes: { ...BOOK }, world: [[path, JSON.stringify(file)]], data: saved as unknown as Record<string, unknown> });
+      expect(second.controller.worldEntities()).toBeNull();
+    }
+  });
+
+  it("shows nothing for a different source, and returns when it is picked again", async () => {
+    const notes = { ...BOOK, "Other/c.md": "Text." };
+    let choice: SourceChoice = { kind: "folder", path: "Other" };
+    const { controller } = await setup({ notes, host: { pickSource: () => Promise.resolve(choice) } });
+    await withConfirmedPlan(controller);
+    await controller.check();
+    await controller.chooseSource();
+    expect(controller.worldEntities()).toBeNull();
+    choice = FOLDER;
+    await controller.chooseSource();
+    expect(controller.worldEntities()).not.toBeNull();
+  });
+
+  it("ignores a file from another review, and a damaged one", async () => {
+    const first = await setup({ notes: { ...BOOK } });
+    await withConfirmedPlan(first.controller);
+    await first.controller.check();
+    const saved = first.data() as Record<string, unknown>;
+    const path = "plugins/bunsho/world.json";
+    await engine!.close();
+    const other = await setup({ notes: { ...BOOK }, world: [[path, JSON.stringify({ version: 1, checkedAt: 1, reads: [], cast: [] })]], data: saved });
+    expect(other.controller.worldEntities()).toBeNull();
+    await engine!.close();
+    const damaged = await setup({ notes: { ...BOOK }, world: [[path, "{not json"]], data: saved });
+    expect(damaged.controller.worldEntities()).toBeNull();
+  });
+
+  it("is removed on sign-out, along with the findings", async () => {
+    const { controller, stored } = await setup({ notes: { ...BOOK } });
+    await withConfirmedPlan(controller);
+    await controller.check();
+    await controller.signOut();
+    expect(stored.has("plugins/bunsho/world.json")).toBe(false);
+    expect(controller.worldEntities()).toBeNull();
+  });
+
+  it("a file that cannot be written does not lose the paid check", async () => {
+    const { controller } = await setup({ notes: { ...BOOK }, failWrite: true });
+    await withConfirmedPlan(controller);
+    await controller.check();
+    expect(controller.phase.kind).toBe("idle");
+    expect(controller.currentReview()?.issues).toHaveLength(1);
+    expect(controller.worldEntities()?.[0].name).toBe("Mira");
+  });
+
+  it("maps a fact in a long note's later part to the note's text", async () => {
+    const line = (seed: string, i: number) => `${seed} ${i} is a line of plain prose that keeps on going for a while.`;
+    const body = (seed: string) => Array.from({ length: 500 }, (_, i) => line(seed, i)).join("\n");
+    const raw = `${body("before")}\nHer eyes were green that day.\n${body("after")}`;
+    const { controller } = await setup({ notes: { "Book/long.md": raw } });
+    await withConfirmedPlan(controller);
+    await controller.check();
+    const row = controller.worldEntities()![0].rows[0];
+    const page = controller.currentReview()!.pages.find((p) => p.pageId === row.pageId)!;
+    expect(raw.slice(page.noteOffset + row.start, page.noteOffset + row.end)).toBe(row.quote);
+  });
+});
+
 describe("saving", () => {
   it("writes one at a time, and the last write holds the latest data", async () => {
     let running = 0;
@@ -229,7 +409,7 @@ describe("older data", () => {
     const { controller, saved } = await setup({ notes: { "Book/a.md": "One." } });
     expect(saved.length).toBeGreaterThan(0);
     const fresh = new ContinuityController({
-      app: { secretStorage: { getSecret: () => "", setSecret: () => undefined } } as never, version: "0", openPanel: () => Promise.resolve(), changed: () => undefined,
+      app: { secretStorage: { getSecret: () => "", setSecret: () => undefined }, vault: { adapter: { exists: () => Promise.resolve(false) } } } as never, version: "0", dir: "x", openPanel: () => Promise.resolve(), changed: () => undefined,
       loadData: () => Promise.resolve({ manuscriptFolder: " /My Book/ ", lastReview: { chapters: [], issues: [] } }), saveData: () => Promise.resolve(),
       confirmCheck: () => Promise.resolve("cancel"), reviewPlan: () => Promise.resolve(null), pickSource: () => Promise.resolve(null), confirmReplaceProject: () => Promise.resolve(false),
     });

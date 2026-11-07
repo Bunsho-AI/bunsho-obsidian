@@ -42,6 +42,8 @@ The plugin does nothing until you sign in: the panel and settings show only the 
 
 Bunsho uses AI and can make mistakes. Check findings against your story.
 
+The **World** tab lists the people, places and things a check found, with the passage each fact comes from. It costs nothing extra, and it is read-only for now.
+
 On the free plan your vault is your one project. You can change what it reads at any time, and you can switch your free project to another vault as often as you like.
 
 Checking only ever runs when you press the button. Writing is never metered.
@@ -52,7 +54,7 @@ Checking only ever runs when you press the button. Writing is never metered.
 - **Payment.** A check is paid for with Bunsho credits. Credits are bought at bunsho.io, not inside the plugin.
 - **Network use.** When you confirm a check, the plugin sends the text of the notes and sections on your reading plan to the Bunsho service (`engine.bunsho.io`) over an encrypted connection to be checked, and receives the findings. While you are signed in it also reads your credit balance and the current price from the Bunsho service (when Obsidian starts, when the panel opens and after a check), and it contacts Google and Firebase to sign you in and keep you signed in. Sign-in opens a page served from your own computer in your browser; that page loads Firebase's sign-in code from Google. Requests carry a random install id generated on this machine and the plugin version; the install id protects the free starter allowance from abuse. Your notes are not sent at any other time.
 - **Telemetry.** The plugin sends no analytics or telemetry. The Bunsho service keeps the account and billing records needed to charge credits; see the privacy policy at https://bunsho.io/privacy.
-- **Stored on your machine.** Findings and dismissals live in the plugin's `data.json`. Your sign-in is kept in Obsidian's secret storage, never in `data.json`.
+- **Stored on your machine.** Findings and dismissals live in the plugin's `data.json`, and the World tab's facts and quotes in `world.json` beside it, in your vault's plugin folder. Your sign-in is kept in Obsidian's secret storage, never in `data.json`.
 - **Open source.** The plugin is a thin client under the MIT license. Detection runs in the Bunsho service.
 
 ## Development

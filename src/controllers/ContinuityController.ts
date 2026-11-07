@@ -8,11 +8,13 @@ import { countWords } from "@/lib/contract/countWords";
 import { ProgressTracker } from "@/helpers/progress";
 import type { EngineIssueCitation } from "@/lib/contract/engine.types";
 import { PipelineV3Client, PipelineV3Error } from "@/lib/contract/pipelineV3Client";
-import { PIPELINE_V3_PRICE_OP, type PipelineV3Health } from "@/lib/contract/pipelineV3.types";
+import { PIPELINE_V3_PRICE_OP, type CastMember, type ChapterRead, type PipelineV3Health } from "@/lib/contract/pipelineV3.types";
 import { pipelineV3ReviewCredits } from "@/lib/contract/pipelineV3Pricing";
 import { selectPassage } from "@/lib/obsidian/editor";
 import { secretSessionStore } from "@/lib/obsidian/secretStore";
 import { readSourceNotes, sourceOptions } from "@/lib/obsidian/vault";
+import { readWorld, removeWorld, writeWorld, type WorldData } from "@/lib/obsidian/worldStore";
+import { projectWorld, type WorldEntity, type WorldRow } from "@/helpers/world";
 import { AUTH_CONFIG } from "@/lib/services/auth/authConfig";
 import { AuthError, TokenSource } from "@/lib/services/auth/authService";
 import { claimStarterCredits, formPost, makeTransport, readBalance, type ConnectionOptions } from "@/lib/services/engine/engineService";
@@ -44,6 +46,8 @@ export type PlanAnswer = { kind: "plan"; plan: SavedPlan } | { kind: "change_sou
 export interface ControllerHost {
   app: App;
   version: string;
+  /** The plugin's folder in the vault. */
+  dir: string;
   loadData(): Promise<unknown>;
   saveData(data: PluginData): Promise<void>;
   openPanel(): Promise<void>;
@@ -72,6 +76,11 @@ export class ContinuityController {
   private scanSeq = 0;
   private accountSeq = 0;
   private idsChanged = false;
+  private world: WorldData | null = null;
+  private worldWrites: Promise<void> = Promise.resolve();
+  /** Bumped when the local session ends: a review still finishing then keeps nothing. */
+  private sessionGen = 0;
+  private projected: { world: WorldData; entities: WorldEntity[] } | null = null;
   private saving: Promise<void> = Promise.resolve();
   /** The source of the review in flight, which can take minutes: a rename while it runs must reach its result. */
   private reviewing: SourceChoice | null = null;
@@ -94,6 +103,7 @@ export class ContinuityController {
     // A vault's data.json can be synced or copied from elsewhere: never send a token to an address that is not ours to trust.
     if (!acceptableEngineUrl(this.data.engineUrl)) this.data.engineUrl = AUTH_CONFIG.engineUrl;
     await this.save();
+    this.world = await readWorld(this.app, this.host.dir);
   }
 
   dispose(): void {
@@ -229,6 +239,7 @@ export class ContinuityController {
         ]);
         next = { signedIn, health, balance, problem: null, project: project.state, registeredName: project.registeredName };
       } catch (error) {
+        if (error instanceof AuthError && error.code === "signed_out") await this.forgetSession();
         next = error instanceof AuthError && error.code === "signed_out" ? { ...SIGNED_OUT, problem: error.message }
           : { ...next, problem: error instanceof PipelineV3Error || error instanceof AuthError ? error.message : "Could not reach Bunsho. Check your connection." };
       }
@@ -261,10 +272,20 @@ export class ContinuityController {
   async signOut(): Promise<void> {
     this.accountSeq++;
     this.starterClaimed = false;
-    await this.tokens.signOut();
-    this.data.lastReview = null;
-    await this.save();
+    try {
+      await this.tokens.signOut();
+    } finally {
+      await this.forgetSession();
+    }
     await this.refreshAccount();
+  }
+
+  /** What this account's check left on this machine goes when the session does, whether the writer signed out or it was revoked. */
+  private async forgetSession(): Promise<void> {
+    this.sessionGen++;
+    this.abort?.abort();
+    this.data.lastReview = null;
+    try { await this.save(); } finally { await this.setWorld(null); }
   }
 
   /**
@@ -394,15 +415,21 @@ export class ContinuityController {
     this.abort = abort;
     this.reviewing = source;
     const tracker = new ProgressTracker();
+    const session = this.sessionGen;
+    const reads: ChapterRead[] = [];
+    let cast: CastMember[] = [];
     this.setPhase({ kind: "checking", share: 0, waiting: true });
     try {
       const outcome = await runReview({
         items, source, health, workspaceId: this.data.workspaceId, client: new PipelineV3Client(this.transport()),
         maxCredits: credits ?? undefined, signal: abort.signal,
-        callbacks: { onProgress: (p) => this.setPhase({ kind: "checking", share: tracker.update(p), waiting: false, stage: p.stage }) },
+        onCast: (members) => { cast = members; },
+        callbacks: { onRead: (read) => { reads.push(read); }, onProgress: (p) => this.setPhase({ kind: "checking", share: tracker.update(p), waiting: false, stage: p.stage }) },
       });
+      if (session !== this.sessionGen) return this.idle(); // signed out while it ran
       this.data.lastReview = { ...outcome, source: this.reviewing ?? outcome.source };
       await this.save();
+      await this.setWorld({ checkedAt: outcome.checkedAt, reads, cast });
       this.idle();
       await this.refreshAccount();
     } catch (error) {
@@ -416,6 +443,54 @@ export class ContinuityController {
 
   /** How the free project is named on every surface ("Your free project is …"): the vault is the project. */
   private projectName(): string { return this.app.vault.getName(); }
+
+  /** The in-memory copy stands even if the file cannot be written, so a paid check's World still shows until the next start. */
+  private setWorld(world: WorldData | null): Promise<void> {
+    this.world = world;
+    const write = this.worldWrites.then(async () => {
+      if (world) await writeWorld(this.app, this.host.dir, world);
+      else await removeWorld(this.app, this.host.dir);
+    }).catch((error: unknown) => { console.warn("[Bunsho] could not save the World data", error); });
+    this.worldWrites = write;
+    return write;
+  }
+
+  /** The World of the last check of what is picked now, or null when there is none to show. */
+  worldEntities(): WorldEntity[] | null {
+    const review = this.currentReview();
+    const { world } = this;
+    if (!review || !world || world.checkedAt !== review.checkedAt) return null;
+    try {
+      if (this.projected?.world !== world) this.projected = { world, entities: projectWorld(world.cast, world.reads) };
+      return this.projected.entities;
+    } catch (error) {
+      console.warn("[Bunsho] could not build the World", error);
+      return null;
+    }
+  }
+
+  /** What this World lacks because the check could not read part of the story, in the writer's terms. */
+  worldGaps(): string[] {
+    const review = this.currentReview();
+    const { world } = this;
+    if (!review || !world) return [];
+    const read = new Set(world.reads.map((r) => r.pageId));
+    return [...new Set(review.pages.filter((p) => !read.has(p.pageId)).map((p) => p.label))];
+  }
+
+  /** Why a fact may no longer match the story: its page changed or left the plan since the check. Null when it still stands. */
+  factNote(row: Pick<WorldRow, "pageId">): string | null {
+    const { scan } = this;
+    const page = this.currentReview()?.pages.find((p) => p.pageId === row.pageId);
+    if (!page || scan.status !== "ready") return "edited since the check";
+    if (scan.items.some((item) => item.id === page.sourceId && !item.included)) return "left out of the reading plan since the check";
+    return scan.pages.find((p) => p.pageId === row.pageId)?.rev === page.rev ? null : "edited since the check";
+  }
+
+  /** Selects the passage a World fact came from. */
+  async jumpToFact(row: WorldRow): Promise<void> {
+    await this.jump({ page_id: row.pageId, quoted_text: row.quote, source_ref: { snapshotId: "", pageId: row.pageId, rev: "", start: row.start, end: row.end } });
+  }
 
   private setPhase(phase: Phase): void { this.phase = phase; this.host.changed(); }
   private idle(): void { this.setPhase({ kind: "idle" }); }
@@ -431,7 +506,7 @@ export class ContinuityController {
     this.host.changed();
   }
 
-  async jump(citation: EngineIssueCitation): Promise<void> {
+  async jump(citation: Pick<EngineIssueCitation, "page_id" | "quoted_text" | "source_ref">): Promise<void> {
     const page = this.currentReview()?.pages.find((p) => p.pageId === citation.page_id);
     if (!page) return;
     // By id, so a note renamed since the check is still found.
