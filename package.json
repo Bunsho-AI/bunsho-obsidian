@@ -1,0 +1,32 @@
+{
+  "name": "bunsho-obsidian",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bunsho story-continuity checking inside Obsidian.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "node esbuild.config.mjs watch",
+    "build": "tsc --noEmit && node esbuild.config.mjs production",
+    "build:stage": "tsc --noEmit && node esbuild.config.mjs stage",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "check:release": "node scripts/check-release-config.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@eslint/json": "^0.14.0",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.12",
+    "esbuild": "^0.24.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-obsidianmd": "^0.4.2",
+    "obsidian": "latest",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^2.1.0"
+  }
+}

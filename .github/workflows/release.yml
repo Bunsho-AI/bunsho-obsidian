@@ -1,0 +1,32 @@
+# Builds the plugin from source on a version tag and attaches the files Obsidian's directory installs.
+# The tag must equal manifest.json "version" (no leading v); the directory scanner rebuilds from source and compares.
+name: Release
+
+on:
+  push:
+    tags: ["*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Tag matches manifest version
+        run: test "${GITHUB_REF_NAME}" = "$(node -p "require('./manifest.json').version")"
+      - name: Committed sign-in values are present
+        run: npm run check:release
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" main.js manifest.json styles.css --draft --title "${GITHUB_REF_NAME}" --notes "See README.md."

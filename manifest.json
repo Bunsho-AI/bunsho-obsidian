@@ -1,0 +1,10 @@
+{
+  "id": "bunsho",
+  "name": "Bunsho",
+  "version": "0.1.0",
+  "minAppVersion": "1.11.4",
+  "description": "Find plot holes and continuity errors in your manuscript, such as characters, facts and timelines that contradict each other, with both passages quoted.",
+  "author": "Bunsho",
+  "authorUrl": "https://bunsho.io",
+  "isDesktopOnly": true
+}
