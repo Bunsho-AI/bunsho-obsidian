@@ -32,7 +32,7 @@ Findings always point to your own note and passage.
 
 ## Using it
 
-The plugin does nothing until you sign in: the panel and settings show only the sign-in until then.
+The plugin does nothing until you sign in: the panel shows only the sign-in until then.
 
 1. Install and enable the plugin, then open **Bunsho** from the ribbon or the command palette.
 2. Sign in with Google.
@@ -52,7 +52,17 @@ A check is charged for the text it reads in full. If a review stops, your findin
 
 Filter findings by kind with the chips above the list, or use **Jump to issue**. Both are free.
 
-The **World** tab lists the people, places, things and groups a check found, with the passage each fact comes from. **Events** lists what changes between chapters, such as where someone is, and each place opens its passage. It costs nothing extra, and it is read-only for now.
+The **World** tab lists the people, places, things and groups a check found, with the passage each fact comes from. **Events** lists what changes between chapters, such as where someone is, and each place opens its passage. It costs nothing extra.
+
+### Your canon
+
+The World is also your story record, and writing in it costs nothing. **Make canon** on anything a check found declares it true, keeping the passage it came from; **Revert** takes that back. **Add character** (or place, object, group), **Add a fact**, **Add alias** and **Rename** let you write the record by hand, before any check if you like. Renaming keeps the old name as an alias, because your prose still says it. Bunsho never merges two people: if a name is already taken it asks whether this is someone new or another name for them.
+
+Every check holds your prose against the facts you declared, on the chapters it checks, for free. A passage that disagrees becomes a card with the page on one side and canon on the other, and you decide which is wrong. **Revert** on its Resolve screen withdraws the fact; the card goes at your next check.
+
+Facts that can change, such as where someone is, and what someone knows, are kept in your record but are not checked against your prose.
+
+When your canon has changed since the whole book was last checked against it, **Check canon** appears with its price on the button: the book's characters at the canon rate, and a small charge per fact. It checks your declared facts alone, and only once every chapter has been read. If your plan has ended, everything you declared stays and shows, and you can change it again when you renew.
 
 Once you are signed in, the top of the panel shows your plan and your credit balance whenever Bunsho can read them.
 
@@ -66,9 +76,11 @@ Checking only ever runs when you press the button. Writing is never metered.
 
 - **Account required.** Checking needs a Bunsho account and credits.
 - **Payment.** A check is paid for with Bunsho credits. Credits are bought at bunsho.io, not inside the plugin.
-- **Network use.** When you confirm a check, the plugin sends the text of the notes and sections on your reading plan to the Bunsho service (`engine.bunsho.io`) over an encrypted connection to be checked, and receives the findings. A check of the whole book sends all of that text. A check of one chapter, of changed chapters or Check if fixed sends those chapters in full, the paragraphs of other chapters that mention the same people, and what earlier checks read from your book (facts, quotes and names). While you are signed in it also reads your plan, your credit balance and the current price from the Bunsho service (when Obsidian starts, when the panel opens, after a check, and when you come back to Obsidian, at most once a minute), and it contacts Google and Firebase to sign you in and keep you signed in. Sign-in opens a page served from your own computer in your browser; that page loads Firebase's sign-in code from Google. Requests carry a random install id generated on this machine and the plugin version; the install id protects the free starter allowance from abuse. Your notes are not sent at any other time.
+- **Network use.** When you confirm a check, the plugin sends the text of the notes and sections on your reading plan to the Bunsho service (`engine.bunsho.io`) over an encrypted connection to be checked, and receives the findings. A check of the whole book sends all of that text. A check of one chapter, of changed chapters or Check if fixed sends those chapters in full, the paragraphs of other chapters that mention the same people, and what earlier checks read from your book (facts, quotes and names). Every check also sends the facts you declared that a check can test (a name, what it is about, and its value), and Check canon sends your whole book and those facts. Declaring a fact sends nothing, except that a free account's first one makes this vault its one project, sending the vault's name. While you are signed in it also reads your plan, your credit balance and the current price from the Bunsho service (when Obsidian starts, when the panel opens, after a check, and when you come back to Obsidian, at most once a minute), and it contacts Google and Firebase to sign you in and keep you signed in. Sign-in opens a page served from your own computer in your browser; that page loads Firebase's sign-in code from Google. Requests carry a random install id generated on this machine and the plugin version; the install id protects the free starter allowance from abuse. Your notes are not sent at any other time.
 - **Telemetry.** The plugin sends no analytics or telemetry. The Bunsho service keeps the account and billing records needed to charge credits; see the privacy policy at https://bunsho.io/privacy.
-- **Stored on your machine.** Findings and dismissals live in the plugin's `data.json`, and what checks read (facts, quotes and the cast, used by the World tab and sent back on chapter checks) in `world.json` beside it, in your vault's plugin folder. Your sign-in is kept in Obsidian's secret storage, never in `data.json`.
+- **Stored on your machine.** Findings and dismissals live in the plugin's `data.json`, what checks read (facts, quotes and the cast, used by the World tab and sent back on chapter checks) in `world.json` beside it, and your canon in `canon.json`, all in your vault's plugin folder. Your sign-in is kept in Obsidian's secret storage, never in `data.json`.
+- **Signing out keeps your data.** Signing out stops a running check and ends your session. Your findings, decisions, World and canon stay on your machine, so they are there when you sign back in. To remove them, use **Delete my Bunsho data** in the plugin's settings, which also works signed out and says exactly what it removes first. If a different Bunsho account signs in on this vault, it sees none of that data and sends none of it; the data is kept, and returns when the first account signs back in. **Delete my Bunsho data** removes every account's data on this vault.
+- **Uninstalling deletes your canon.** Obsidian removes the whole plugin folder when a plugin is uninstalled, and `canon.json`, your findings and the World go with it. Disabling the plugin keeps them. Copy `canon.json` somewhere safe first if you want to keep it.
 - **Open source.** The plugin is a thin client under the MIT license. Detection runs in the Bunsho service.
 
 ## Development
@@ -93,15 +105,15 @@ Atomic layers. A file may import from layers below it in this list, never above:
 ```
 src/
   main.ts            plugin entry: icon, view, commands, settings; hands everything to the controller
-  pages/             what Obsidian mounts: ContinuityView (panel), SettingsTab, ConfirmCheckModal, JumpPickerModal
-  organisms/         SignInPanel, ManuscriptHelp, FindingCard, FindingsList, ResolverPanel, JumpPicker
-  molecules/         BrandHeader, PanelFoot, TimelineRow, StatusRow, GroupHeader, Passage, AlertCard, EmptyState, SpectrumChips, SpectrumPill, CheckChapterControl, ChangedChaptersRow
-  atoms/             TextAction, FillButton, QuietButton, Fact, SeverityLabel, BunshoWordmark, GoogleSignInButton
+  pages/             what Obsidian mounts: ContinuityView (panel), SettingsTab, ConfirmCheckModal, ConfirmDeleteDataModal, JumpPickerModal
+  organisms/         SignInPanel, ManuscriptHelp, FindingCard, FindingsList, ResolverPanel, JumpPicker, WorldList, CanonConflictCard, CanonEntityComposer, CanonFactComposer, CanonFactEdit, CanonEntityRename
+  molecules/         BrandHeader, PanelFoot, TimelineRow, StatusRow, GroupHeader, Passage, AlertCard, EmptyState, SpectrumChips, SpectrumPill, CheckChapterControl, ChangedChaptersRow, CanonFactRow, CanonAliasRow, CanonAddControl, IdentityPrompt, CanonReadOnlyCard, CanonStartInvitation
+  atoms/             TextAction, FillButton, QuietButton, Fact, SeverityLabel, BunshoWordmark, GoogleSignInButton, PenField
   controllers/       ContinuityController: state and actions (the "hooks" layer for a non-React app)
   types/             shared state and persisted-data types
-  lib/obsidian/      Obsidian API glue: vault reading, secret storage, selecting a passage
+  lib/obsidian/      Obsidian API glue: vault reading, secret storage, selecting a passage, what is kept in world.json and canon.json
   lib/services/      engine access: auth (Google sign-in), engine (HTTP), review (WebSocket), project (free plan)
-  helpers/           Bunsho domain logic, pure: chapters, quote location, progress, one-project state, the review merge, passages, the account line, support
+  helpers/           Bunsho domain logic, pure: chapters, quote location, progress, one-project state, the review merge, passages, the account line, whose data this is, support, and canon/ (the desktop's pen, pins, vocabulary and ids, what a World card shows, how a canon finding reads)
   lib/contract/      the engine wire contract, copied from the desktop app (change with the engine)
   assets/            the wordmark images (inlined into main.js), the ribbon icon and Google's G (SVG)
   utils/             generic pure functions: markdown projection, hashing, formatting, URLs

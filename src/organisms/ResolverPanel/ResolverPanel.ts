@@ -7,9 +7,14 @@ import { TextAction } from "@/atoms/TextAction";
  */
 export interface ResolverPassage { quote: string; coordinate: string; onOpen: () => void }
 
+/** The declared fact, on the rail of a canon finding, with Revert at the point of the fact. */
+export interface ResolverCanon { factLabel: string; value: string; mark: string; failure: string | null; onRevert: (() => void) | null }
+
 export interface ResolverPanelProps {
   claim: string;
   passages: ResolverPassage[];
+  /** A canon finding: this block takes the place of "Contradicts" as the second, and any further passage follows it. */
+  canon?: ResolverCanon | null;
   note: string | null;
   subject: string | null;
   summary: string | null;
@@ -51,7 +56,21 @@ export function ResolverPanel(parent: HTMLElement, props: ResolverPanelProps): v
   if (props.onJump) TextAction(root.createDiv({ cls: "bunsho-resolver-jump" }), { label: "Jump to issue", quiet: true, focusKey: "jump:open", onClick: props.onJump });
 
   const rail = root.createDiv({ cls: "bunsho-list" });
-  props.passages.forEach((passage, index) => block(rail, index === 0 ? "This page" : "Contradicts", index === 0, passage, index));
+  props.passages.forEach((passage, index) => {
+    block(rail, index === 0 ? "This page" : "Contradicts", index === 0, passage, index);
+    if (index === 0 && props.canon) {
+      const { canon } = props;
+      const card = rail.createDiv({ cls: "bunsho-card bunsho-rail-canon", attr: { "data-rail-block": "canon" } });
+      card.createSpan({ cls: "bunsho-caps", text: "Canon" });
+      const line = card.createDiv({ cls: "bunsho-world-fact" });
+      line.createSpan({ cls: "bunsho-world-label", text: canon.factLabel });
+      line.createSpan({ cls: "bunsho-world-value is-canon", text: canon.value });
+      const foot = card.createDiv({ cls: "bunsho-card-foot" });
+      Fact(foot, canon.mark, "bunsho-coords");
+      if (canon.onRevert) TextAction(foot, { label: "Revert", plain: true, focusKey: "resolver:revert", onClick: canon.onRevert });
+      if (canon.failure) card.createDiv({ cls: "bunsho-problem", text: canon.failure });
+    }
+  });
   if (props.note) {
     const note = rail.createDiv({ cls: "bunsho-card bunsho-rail-plain" });
     note.createSpan({ cls: "bunsho-caps", text: "Note" });

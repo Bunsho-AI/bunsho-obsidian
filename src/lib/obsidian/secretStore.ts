@@ -12,3 +12,14 @@ export function secretSessionStore(app: App): SessionStore {
     clear: () => { secrets.setSecret(SECRET_ID, ""); return Promise.resolve(); },
   };
 }
+
+const OWNER_ID = "bunsho-session-owner";
+
+/** Which account this machine's session is for, as a hash, so the right data shows offline. Not a credential: it only chooses local files. */
+export function sessionOwnerStore(app: App): { get(): string | null; set(key: string): void; clear(): void } {
+  return {
+    get: () => app.secretStorage.getSecret(OWNER_ID) || null,
+    set: (key) => app.secretStorage.setSecret(OWNER_ID, key),
+    clear: () => app.secretStorage.setSecret(OWNER_ID, ""),
+  };
+}

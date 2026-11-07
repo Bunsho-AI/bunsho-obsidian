@@ -6,8 +6,9 @@ import type { CurrentChapter, MergeRun, ReviewCoverage, ReviewOutcome } from "@/
 import { buildUnits, snapshotId, type PlannedItem, type SourceChoice } from "@/helpers/sources";
 import { PipelineV3Client, PipelineV3Error, type PipelineV3ReviewCallbacks } from "@/lib/contract/pipelineV3Client";
 import { groundIssues, type GroundingPage } from "@/lib/contract/grounding";
-import { PIPELINE_V3_PRICE_OP, type CastMember, type ChapterRead, type PipelineV3Health, type PipelineV3Result } from "@/lib/contract/pipelineV3.types";
-import { pipelineV3ReviewCredits } from "@/lib/contract/pipelineV3Pricing";
+import type { EngineIssue } from "@/lib/contract/engine.types";
+import { PIPELINE_V3_LIMITS, PIPELINE_V3_PRICE_OP, type CastMember, type ChapterRead, type PipelineV3Health, type PipelineV3Pin, type PipelineV3Result } from "@/lib/contract/pipelineV3.types";
+import { PIPELINE_V3_CANON_PRICE_OP, pipelineV3CanonCredits, pipelineV3ReviewCredits } from "@/lib/contract/pipelineV3Pricing";
 
 export type { ReviewCoverage, ReviewOutcome };
 
@@ -27,6 +28,8 @@ export interface RunReviewInput {
   /** Plan items to check. Absent: a full review. Every other item goes as passages, whichever way it is cut. */
   scope?: ReadonlySet<string> | null;
   known?: KnownBook;
+  /** The writer's canon: every active pin is checked on the pages being checked, free. */
+  pins?: readonly PipelineV3Pin[];
 }
 
 /** One finished review, before anything is stored. */
@@ -85,7 +88,7 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRun> {
     // Every chapter is listed, even one with no selected passages: the engine keeps a cached read as context only for a chapter
     // listed at that read's revision.
     pages: units.map((u) => ({ pageId: u.pageId, order: u.order, rev: u.rev, send: whole.has(u.pageId) ? "whole" as const : "passages" as const, ...(u.part ? { part: u.part } : {}) })),
-    pins: [],
+    pins: [...(input.pins ?? [])],
     focusNames: focus?.focusNames ?? [],
     ...(input.maxCredits === undefined ? {} : { maxCredits: input.maxCredits }),
   };
@@ -119,7 +122,8 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRun> {
     refundedCredits: result.refundedCredits ?? 0,
     droppedFindings: grounded.droppedIssues,
     unreadPages: result.unreadPages ?? [],
-    capped: (result.stats?.shortlistDropped ?? 0) > 0 || (result.stats?.canonPinsDropped ?? 0) > 0,
+    // Searches that failed count too: a pin nobody searched for proves nothing about a card, or about the canon.
+    capped: (result.stats?.shortlistDropped ?? 0) > 0 || (result.stats?.canonPinsDropped ?? 0) > 0 || (result.stats?.skippedJevRequests ?? 0) > 0,
     cast: result.cast,
     readPolicyId: result.readPolicyId,
     checked: [...whole],
@@ -127,5 +131,68 @@ export async function runReview(input: RunReviewInput): Promise<ReviewRun> {
     alone,
     lostFindings: grounded.droppedIssues + (result.malformedIssues ?? 0),
     cachedReads: cachedReads.length,
+  };
+}
+
+/** The most pinned facts one review can carry (engine protocol.ts MAX_V3_PINS). Past it the engine refuses the whole start. */
+export const MAX_PINS = 200;
+
+/** What Check canon costs for this book and these pins: the characters at the canon rate, plus each pin. Null when the engine offers no canon price. */
+export function canonCredits(health: PipelineV3Health, chars: number, pins: number): number | null {
+  const { canonCreditsPerThousandChars: rate, canonCreditsPerPin, minimumUnits } = health.pricing;
+  if (rate === null || rate === undefined) return null;
+  return pipelineV3CanonCredits({ op: PIPELINE_V3_CANON_PRICE_OP, creditsPerThousandChars: rate, minimumUnits }, chars, pins, canonCreditsPerPin);
+}
+
+export type CanonRun =
+  /** Not every chapter's names would fit or are known: nothing was sent, and nothing charged. */
+  | { kind: "unread" }
+  | { kind: "ran"; snapshotId: string; pages: ReviewRun["pages"]; issues: EngineIssue[]; capped: boolean; skipped: boolean; lostFindings: number; texts: Map<string, CurrentChapter>; refundedCredits: number };
+
+export interface RunCanonInput {
+  items: readonly PlannedItem[];
+  health: PipelineV3Health;
+  workspaceId: string;
+  client: Pick<PipelineV3Client, "review">;
+  pins: readonly PipelineV3Pin[];
+  reads: readonly KeptRead[];
+  maxCredits?: number;
+  callbacks?: PipelineV3ReviewCallbacks;
+  signal?: AbortSignal;
+}
+
+const FRAME_MARGIN_BYTES = 256 * 1024;
+const framed = (value: unknown): number => Buffer.byteLength(JSON.stringify(value), "utf8");
+
+/**
+ * "Check canon": the pins alone across the whole book (desktop runPipelineV3CanonReview.ts). Every chapter goes whole, with its read's
+ * cast and none of its facts: the engine reads nothing, and takes the pinned people's names from them. The pass can only prove the
+ * canon holds if every chapter's names went along, so otherwise it is not bought.
+ */
+export async function runCanonReview(input: RunCanonInput): Promise<CanonRun> {
+  const { health, pins } = input;
+  const { units, pages } = buildUnits(input.items);
+  const snapshot = snapshotId(units);
+  const chars = units.reduce((n, unit) => n + unit.text.length, 0);
+  assertWithinConfirmedPrice(canonCredits(health, chars, pins.length), input.maxCredits);
+  const startBase = {
+    reviewId: randomUUID(), workspaceId: input.workspaceId, snapshotId: snapshot, scope: "canon" as const, policyId: health.policyId, readPolicyId: health.readPolicyId,
+    pages: units.map((u) => ({ pageId: u.pageId, order: u.order, rev: u.rev, send: "whole" as const, ...(u.part ? { part: u.part } : {}) })),
+    pins: [...pins], focusNames: [], ...(input.maxCredits === undefined ? {} : { maxCredits: input.maxCredits }),
+  };
+  const usable = usableReads(input.reads, health.readPolicyId, units.map((unit) => ({ pageId: unit.pageId, rev: unit.rev, order: unit.order })))
+    .map((read) => ({ ...read, facts: [], povBreaks: [], droppedFacts: 0 }));
+  let budget = PIPELINE_V3_LIMITS.maxFrameBytes - FRAME_MARGIN_BYTES - framed({ ...startBase, cachedReads: [] });
+  const cachedReads = usable.filter((read) => { const size = framed(read) + 1; if (size > budget) return false; budget -= size; return true; });
+  if (cachedReads.length !== units.length) return { kind: "unread" };
+
+  const result = await input.client.review({ start: { ...startBase, cachedReads }, pages: units.map((u) => ({ pageId: u.pageId, text: u.text })), passages: [] }, input.callbacks, input.signal);
+  const grounding = new Map<string, GroundingPage>(units.map((u) => [u.pageId, { pageId: u.pageId, pageOrder: u.order, rev: u.rev, text: u.text }]));
+  const grounded = groundIssues(result.issues, snapshot, grounding);
+  return {
+    kind: "ran", snapshotId: snapshot, pages, issues: grounded.issues,
+    capped: (result.stats?.canonPinsDropped ?? 0) > 0, skipped: (result.stats?.skippedJevRequests ?? 0) > 0,
+    lostFindings: grounded.droppedIssues + (result.malformedIssues ?? 0),
+    texts: new Map(units.map((u) => [u.pageId, { rev: u.rev, text: u.text }])), refundedCredits: result.refundedCredits ?? 0,
   };
 }

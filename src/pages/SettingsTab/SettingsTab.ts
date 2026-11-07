@@ -1,8 +1,9 @@
-/** Plugin settings. Signed out, only the account and privacy sections show (nothing works without a sign-in). */
-import { PluginSettingTab, Setting, type App, type Plugin } from "obsidian";
+/** Plugin settings. Signed out, only the account, privacy and delete sections show (nothing else works without a sign-in). */
+import { Notice, PluginSettingTab, Setting, type App, type Plugin } from "obsidian";
 import type { ContinuityController } from "@/controllers/ContinuityController";
 import { accountSummary } from "@/helpers/account";
 import { HELP_CENTER_URL, SUPPORT_EMAIL, SUPPORT_REPLY_PROMISE } from "@/helpers/support";
+import { confirmDeleteData } from "@/pages/ConfirmDeleteDataModal";
 import { isLocalEngine } from "@/utils/url";
 
 export class SettingsTab extends PluginSettingTab {
@@ -18,7 +19,22 @@ export class SettingsTab extends PluginSettingTab {
         if (c.account.signedIn) await c.signOut(); else await c.signIn();
         this.display();
       }));
-    new Setting(containerEl).setName("Privacy").setDesc("The notes you choose are sent to the Bunsho service, over an encrypted connection, only when you confirm a check. While you are signed in, the plugin also reads your plan, your credit balance and the current price. The plugin sends no analytics.");
+    new Setting(containerEl).setName("Privacy").setDesc("The notes you choose are sent to the Bunsho service, over an encrypted connection, only when you confirm a check. While you are signed in, the plugin also reads your plan, your credit balance and the current price. The plugin sends no analytics. Your findings, what checks read and your canon stay on this machine when you sign out, ready for when you sign back in.");
+    new Setting(containerEl).setName("Delete my Bunsho data").setDesc("Removes your findings and decisions, what checks read, your canon and your reading plan from this vault's plugin folder. Your notes are not touched.")
+      .addButton((b) => {
+        b.setButtonText("Delete my Bunsho data").onClick(async () => {
+          if (!(await confirmDeleteData(this.app, c.holdsOtherAccounts()))) return;
+          try {
+            await c.deleteData();
+            new Notice("Your Bunsho data on this vault is deleted.");
+          } catch (error) {
+            console.warn("[Bunsho] could not delete the data", error);
+            new Notice("Bunsho could not delete all of it. Try again.");
+          }
+          this.display();
+        });
+        b.buttonEl.addClass("mod-warning");
+      });
     if (!c.account.signedIn) return;
     new Setting(containerEl).setName("Contact support").setDesc(`Write to ${SUPPORT_EMAIL} and a person reads it. ${SUPPORT_REPLY_PROMISE} The plugin adds only its version, in the subject.`)
       .addButton((b) => b.setButtonText("Help center").onClick(() => window.open(HELP_CENTER_URL, "_external")))
