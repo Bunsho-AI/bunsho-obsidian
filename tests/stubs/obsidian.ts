@@ -9,3 +9,4 @@ export class MarkdownView {}
 export class TFile {}
 export class TFolder {}
 export const getAllTags = (): string[] => [];
+export const setIcon = (): void => undefined;

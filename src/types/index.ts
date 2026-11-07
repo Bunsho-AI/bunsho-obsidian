@@ -17,6 +17,8 @@ export interface PluginData {
   installId: string;
   workspaceId: string;
   dismissed: string[];
+  /** Findings the writer closed from the Resolve screen as intended. Like dismissals, they stay closed on later checks. */
+  deliberate: string[];
   lastReview: ReviewOutcome | null;
 }
 

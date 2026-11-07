@@ -2,7 +2,7 @@
  * The Bunsho panel (an Obsidian view). The only UI layer that reads the controller: it turns state into props for the
  * organisms below. Mirrors the desktop Continuity tab; colours follow the writer's theme (see styles.css).
  */
-import { ItemView, type WorkspaceLeaf } from "obsidian";
+import { ItemView, Notice, type WorkspaceLeaf } from "obsidian";
 import { BUNSHO_ICON_ID } from "@/assets/logo";
 import { FillButton } from "@/atoms/FillButton";
 import type { ContinuityController } from "@/controllers/ContinuityController";
@@ -16,9 +16,12 @@ import { AlertCard } from "@/molecules/AlertCard";
 import { BrandHeader } from "@/molecules/BrandHeader";
 import { EmptyState } from "@/molecules/EmptyState";
 import { StatusRow } from "@/molecules/StatusRow";
-import { FindingsList, type FindingItem } from "@/organisms/FindingsList";
+import { cardEvidence, displayOrder, nextOpenIssue, railEvidence, resolutionOf, resolverContext } from "@/helpers/findings";
+import { FindingsList, type FindingItem, type ResolvedItem } from "@/organisms/FindingsList";
+import { ResolverPanel } from "@/organisms/ResolverPanel";
 import { WorldList } from "@/organisms/WorldList";
 import { PanelTabs } from "@/molecules/PanelTabs";
+import { PANEL_TABS, type PanelTabId } from "@/helpers/panelTabs";
 import type { WorldEntity, WorldFilter } from "@/helpers/world";
 import { SourcePrompt } from "@/organisms/SourcePrompt";
 import { SignInPanel } from "@/organisms/SignInPanel";
@@ -34,9 +37,17 @@ const STAGE_LABEL: Record<string, string> = {
 };
 
 export class ContinuityView extends ItemView {
-  private showDismissed = false;
-  private readonly expanded = new Set<string>();
-  private tab: "findings" | "world" = "findings";
+  private showResolved = false;
+  /** The finding open on the Resolve screen, which takes the panel's place as the desktop's takes the window's. */
+  private resolving: string | null = null;
+  /** Where the keyboard goes after this render, when the element it was on has gone. */
+  private focusNext: string | null = null;
+  /** Where the list was when the Resolve screen took its place. */
+  private listScroll = 0;
+  private scrollNext: number | null = null;
+  /** A decision is being saved: the screen's buttons wait for it, as the desktop's do. */
+  private settling = false;
+  private tab: PanelTabId = "continuity";
   private worldFilter: WorldFilter = "people";
   private worldSearch = "";
   private readonly worldOpen = new Set<string>();
@@ -62,8 +73,10 @@ export class ContinuityView extends ItemView {
     const active = root.ownerDocument.activeElement;
     const search = root.querySelector<HTMLInputElement>(".bunsho-world-search");
     const caret = search && active === search ? [search.selectionStart, search.selectionEnd] as const : null;
-    const focusKey = active && root.contains(active) ? active.getAttribute("data-focus-key") : null;
-    const scroll = this.resetScroll ? 0 : root.scrollTop;
+    const focusKey = this.focusNext ?? (active && root.contains(active) ? active.getAttribute("data-focus-key") : null);
+    this.focusNext = null;
+    const scroll = this.scrollNext ?? (this.resetScroll ? 0 : root.scrollTop);
+    this.scrollNext = null;
     this.resetScroll = false;
     root.empty();
     root.addClass("bunsho-panel");
@@ -93,8 +106,9 @@ export class ContinuityView extends ItemView {
     const c = this.controller;
     const { scan } = c;
     if (scan.status === "ready") {
+      if (this.renderResolver(body)) return;
       this.renderSource(body, scan.source.kind === "folder" && scan.source.path === "/" ? "Whole vault" : scan.source.path);
-      PanelTabs(body, { active: this.tab, onSelect: (tab) => { this.tab = tab; this.resetScroll = true; this.render(); }, tabs: [{ id: "findings", label: "Findings" }, { id: "world", label: "World" }] });
+      PanelTabs(body, { active: this.tab, onSelect: (tab) => { this.tab = tab; this.resetScroll = true; this.render(); }, tabs: PANEL_TABS });
       if (this.tab === "world") this.renderWorld(body); else this.renderFindings(body);
       return;
     }
@@ -172,28 +186,101 @@ export class ContinuityView extends ItemView {
       return;
     }
     const dismissed = new Set(c.data.dismissed);
+    const deliberate = new Set(c.data.deliberate);
     const pages = new Map(review.pages.map((page) => [page.pageId, page]));
-    const toItem = (issue: EngineIssue): FindingItem => ({
-      id: issue.issue_id,
-      claim: issue.message,
-      severity: issue.severity,
-      passages: issue.citations.filter((ct) => ct.evidence_role !== "supporting_context").map((ct) => ({
-        quote: ct.quoted_text, coordinate: this.coordinate(ct, pages, true), shortCoordinate: this.coordinate(ct, pages, false),
-        onGo: () => void c.jump(ct),
-      })),
-      expanded: this.expanded.has(issue.issue_id),
-      onExpand: () => { this.expanded.add(issue.issue_id); this.render(); },
-      onToggleDismissed: () => void c.dismiss(issue.issue_id, !dismissed.has(issue.issue_id)),
+    const open = displayOrder(review.issues.filter((i) => !resolutionOf(i.issue_id, dismissed, deliberate)));
+    const toItem = (issue: EngineIssue): FindingItem => {
+      const evidence = cardEvidence(issue);
+      return {
+        id: issue.issue_id,
+        claim: issue.message,
+        severity: issue.severity,
+        quote: evidence?.quoted_text ?? null,
+        coordinate: evidence ? this.coordinate(evidence, pages) : "",
+        onDismiss: () => { this.focusNext = this.focusAfter(open, issue.issue_id); void this.decide(() => c.dismiss(issue.issue_id, true)); },
+        onResolve: () => this.openResolver(issue.issue_id),
+      };
+    };
+    const resolved: ResolvedItem[] = review.issues.flatMap((issue) => {
+      const status = resolutionOf(issue.issue_id, dismissed, deliberate);
+      return status ? [{ id: issue.issue_id, claim: issue.message, status, onRestore: () => { this.focusNext = `resolve:${issue.issue_id}`; void this.decide(() => c.restoreFinding(issue.issue_id)); } }] : [];
     });
     FindingsList(body, {
-      open: review.issues.filter((i) => !dismissed.has(i.issue_id)).map(toItem),
-      dismissed: review.issues.filter((i) => dismissed.has(i.issue_id)).map(toItem),
+      open: open.map(toItem),
+      resolved,
       anyFindings: review.issues.length > 0,
       coverage: { read: review.coverage.sources.length - review.coverage.unreadSources.length, total: review.coverage.sources.length, excluded: review.coverage.excluded,
         noun: c.noun(review.coverage.sources.length), unreadLabels: review.coverage.sources.filter((source) => review.coverage.unreadSources.includes(source.id)).map((source) => source.label) },
-      showDismissed: this.showDismissed,
-      onToggleShowDismissed: () => { this.showDismissed = !this.showDismissed; this.render(); },
+      showResolved: this.showResolved,
+      onToggleShowResolved: () => { this.showResolved = !this.showResolved; this.render(); },
     });
+  }
+
+  private openResolver(id: string): void {
+    if (!this.resolving) this.listScroll = this.contentEl.scrollTop;
+    this.resolving = id;
+    this.focusNext = "resolver:close";
+    this.resetScroll = true;
+    this.render();
+  }
+
+  private closeResolver(focus: string): void {
+    this.resolving = null;
+    this.focusNext = focus;
+    this.scrollNext = this.listScroll;
+    this.render();
+  }
+
+  /** Where the keyboard goes when a finding leaves the list: the next one, or the tab when none is left. */
+  private focusAfter(open: EngineIssue[], id: string): string {
+    const next = nextOpenIssue(open, id);
+    return next ? `resolve:${next.issue_id}` : "tab:continuity";
+  }
+
+  /** Saves a decision. The controller has taken it back if the save failed; the writer is told. */
+  private async decide(action: () => Promise<void>): Promise<boolean> {
+    try {
+      await action();
+      return true;
+    } catch (error) {
+      console.warn("[Bunsho] could not save a decision", error);
+      new Notice("Bunsho could not save that. Try again.");
+      return false;
+    }
+  }
+
+  /** Returns true when the Resolve screen took the panel. A finding a newer check no longer has simply closes it. */
+  private renderResolver(body: HTMLElement): boolean {
+    if (!this.resolving) return false;
+    const c = this.controller;
+    const review = c.currentReview();
+    const issue = review?.issues.find((i) => i.issue_id === this.resolving);
+    const dismissed = new Set(c.data.dismissed);
+    const deliberate = new Set(c.data.deliberate);
+    if (!review || !issue || resolutionOf(issue.issue_id, dismissed, deliberate)) { this.resolving = null; return false; }
+    const pages = new Map(review.pages.map((page) => [page.pageId, page]));
+    const open = displayOrder(review.issues.filter((i) => !resolutionOf(i.issue_id, dismissed, deliberate)));
+    const next = nextOpenIssue(open, issue.issue_id);
+    const id = issue.issue_id;
+    const settle = async (action: () => Promise<void>) => {
+      this.settling = true;
+      this.render();
+      const saved = await this.decide(action);
+      this.settling = false;
+      if (saved && this.resolving === id) this.closeResolver(this.focusAfter(open, id));
+      else this.render();
+    };
+    ResolverPanel(body, {
+      claim: issue.message,
+      passages: railEvidence(issue).map((citation) => ({ quote: citation.quoted_text, coordinate: this.coordinate(citation, pages), onOpen: () => void c.jump(citation) })),
+      ...resolverContext(issue),
+      busy: this.settling,
+      onClose: () => this.closeResolver(`resolve:${id}`),
+      onDeliberate: () => void settle(() => c.markDeliberate(id, true)),
+      onDismiss: () => void settle(() => c.dismiss(id, true)),
+      onNext: next ? () => this.openResolver(next.issue_id) : null,
+    });
+    return true;
   }
 
   private renderWorld(body: HTMLElement): void {
@@ -232,9 +319,7 @@ export class ContinuityView extends ItemView {
   }
 
   /** Where a passage is, in the writer's terms: the note or section. Reading units are never shown. */
-  private coordinate(citation: EngineIssueCitation, pages: Map<string, PageMeta>, full: boolean): string {
-    const page = pages.get(citation.page_id);
-    if (!page) return citation.location_label;
-    return full ? page.label : page.label.split(" / ").pop() ?? page.label;
+  private coordinate(citation: EngineIssueCitation, pages: Map<string, PageMeta>): string {
+    return pages.get(citation.page_id)?.label ?? citation.location_label;
   }
 }

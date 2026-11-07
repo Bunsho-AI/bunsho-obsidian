@@ -3,6 +3,7 @@
  * check lifecycle, findings. Pages read its state and call its actions; components below pages receive plain props.
  */
 import { Notice, type App } from "obsidian";
+import { keepSettledFindings } from "@/helpers/findings";
 import { applyPlan, buildItems, buildUnits, dropNoteIds, holdsNoteId, moveNoteIds, planQuote, snapshotId, sourceContains, type PlannedItem, type SavedPlan, type SourceChoice } from "@/helpers/sources";
 import { countWords } from "@/lib/contract/countWords";
 import { ProgressTracker } from "@/helpers/progress";
@@ -94,12 +95,17 @@ export class ContinuityController {
     const { manuscriptFolder, ...rest } = saved ?? {};
     this.data = {
       source: null, plan: null, noteIds: {}, engineUrl: AUTH_CONFIG.engineUrl, devUid: "",
-      installId: crypto.randomUUID(), workspaceId: crypto.randomUUID(), dismissed: [], lastReview: null, ...rest,
+      installId: crypto.randomUUID(), workspaceId: crypto.randomUUID(), dismissed: [], deliberate: [], lastReview: null, ...rest,
     };
     // Before the reading plan: the folder setting becomes the picked source, and a review from then cannot be mapped back.
     const folder = typeof manuscriptFolder === "string" ? manuscriptFolder.trim().replace(/^\/+|\/+$/gu, "") : "";
     if (!this.data.source && folder) this.data.source = { kind: "folder", path: folder };
     if (this.data.lastReview && !Array.isArray(this.data.lastReview.pages)) this.data.lastReview = null;
+    // data.json can be synced or hand-edited: what the panel reads on every render has to be the shape it expects.
+    const ids = (value: unknown): string[] => (Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : []);
+    this.data.dismissed = ids(this.data.dismissed);
+    this.data.deliberate = ids(this.data.deliberate);
+    if (this.data.lastReview && !Array.isArray(this.data.lastReview.issues)) this.data.lastReview = null;
     // A vault's data.json can be synced or copied from elsewhere: never send a token to an address that is not ours to trust.
     if (!acceptableEngineUrl(this.data.engineUrl)) this.data.engineUrl = AUTH_CONFIG.engineUrl;
     await this.save();
@@ -427,7 +433,9 @@ export class ContinuityController {
         callbacks: { onRead: (read) => { reads.push(read); }, onProgress: (p) => this.setPhase({ kind: "checking", share: tracker.update(p), waiting: false, stage: p.stage }) },
       });
       if (session !== this.sessionGen) return this.idle(); // signed out while it ran
-      this.data.lastReview = { ...outcome, source: this.reviewing ?? outcome.source };
+      const settled = new Set([...this.data.dismissed, ...this.data.deliberate]);
+      const issues = keepSettledFindings(outcome.issues, this.data.lastReview?.issues ?? [], settled);
+      this.data.lastReview = { ...outcome, issues, source: this.reviewing ?? outcome.source };
       await this.save();
       await this.setWorld({ checkedAt: outcome.checkedAt, reads, cast });
       this.idle();
@@ -498,12 +506,31 @@ export class ContinuityController {
 
   cancel(): void { this.abort?.abort(); }
 
-  async dismiss(issueId: string, dismissed: boolean): Promise<void> {
-    const set = new Set(this.data.dismissed);
-    if (dismissed) set.add(issueId); else set.delete(issueId);
-    this.data.dismissed = [...set];
-    await this.save();
-    this.host.changed();
+  async dismiss(issueId: string, dismissed: boolean): Promise<void> { await this.setDecisions(issueId, { dismissed }); }
+
+  /** "This is deliberate" on the Resolve screen: the difference is intended. */
+  async markDeliberate(issueId: string, deliberate: boolean): Promise<void> { await this.setDecisions(issueId, { deliberate }); }
+
+  /** Reopens a settled finding, whichever way it was settled. */
+  async restoreFinding(issueId: string): Promise<void> { await this.setDecisions(issueId, { dismissed: false, deliberate: false }); }
+
+  /** A decision that could not be saved is taken back and the failure reported, so the panel never shows one a restart would lose. */
+  private async setDecisions(issueId: string, change: Partial<Record<"dismissed" | "deliberate", boolean>>): Promise<void> {
+    const apply = (key: "dismissed" | "deliberate", on: boolean) => {
+      const set = new Set(this.data[key]);
+      if (on) set.add(issueId); else set.delete(issueId);
+      this.data[key] = [...set];
+    };
+    const before = { dismissed: this.data.dismissed.includes(issueId), deliberate: this.data.deliberate.includes(issueId) };
+    for (const key of ["dismissed", "deliberate"] as const) if (change[key] !== undefined) apply(key, change[key]);
+    try {
+      await this.save();
+    } catch (error) {
+      for (const key of ["dismissed", "deliberate"] as const) if (change[key] !== undefined) apply(key, before[key]);
+      throw error;
+    } finally {
+      this.host.changed();
+    }
   }
 
   async jump(citation: Pick<EngineIssueCitation, "page_id" | "quoted_text" | "source_ref">): Promise<void> {
