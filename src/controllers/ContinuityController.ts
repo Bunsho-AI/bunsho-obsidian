@@ -16,6 +16,7 @@ import { activeNotePosition, selectPassage } from "@/lib/obsidian/editor";
 import { secretSessionStore } from "@/lib/obsidian/secretStore";
 import { readSourceNotes, sourceOptions } from "@/lib/obsidian/vault";
 import { readWorld, removeWorld, writeWorld, type WorldData } from "@/lib/obsidian/worldStore";
+import { SUPPORT_EMAIL, supportMailto } from "@/helpers/support";
 import { projectWorld, type WorldEntity, type WorldRow } from "@/helpers/world";
 import { AUTH_CONFIG } from "@/lib/services/auth/authConfig";
 import { AuthError, TokenSource } from "@/lib/services/auth/authService";
@@ -103,6 +104,8 @@ function ledgerOf(review: ReviewOutcome): PageLedger {
     .map((page) => [page.pageId, { rev: page.rev, order: page.order, policyId: "", checkedAt: review.checkedAt }]));
 }
 
+const RETURN_REFRESH_MS = 60_000;
+
 export class ContinuityController {
   data!: PluginData;
   scan: Scan = { status: "no_source" };
@@ -118,7 +121,9 @@ export class ContinuityController {
   private worldWrites: Promise<void> = Promise.resolve();
   /** Bumped when the local session ends: a review still finishing then keeps nothing. */
   private sessionGen = 0;
-  private projected: { world: WorldData; review: ReviewOutcome; entities: WorldEntity[] } | null = null;
+  private projected: { world: WorldData; review: ReviewOutcome; orderKey: string; entities: WorldEntity[] } | null = null;
+  /** When the account was last re-read because the writer came back. */
+  private returnedAt = 0;
   private saving: Promise<void> = Promise.resolve();
   /** The source of the review in flight, which can take minutes: a rename while it runs must reach its result. */
   private reviewing: SourceChoice | null = null;
@@ -287,11 +292,11 @@ export class ContinuityController {
         const [health, balance, project] = await Promise.all([
           new PipelineV3Client(transport).health(), readBalance(transport), readProjectState(transport, this.data.workspaceId),
         ]);
-        next = { signedIn, health, balance, problem: null, project: project.state, registeredName: project.registeredName };
+        next = { signedIn, health, balance, planName: project.planName, problem: null, project: project.state, registeredName: project.registeredName };
       } catch (error) {
         if (error instanceof AuthError && error.code === "signed_out") await this.forgetSession();
         next = error instanceof AuthError && error.code === "signed_out" ? { ...SIGNED_OUT, problem: error.message }
-          : { ...next, problem: error instanceof PipelineV3Error || error instanceof AuthError ? error.message : "Could not reach Bunsho. Check your connection." };
+          : { ...next, planName: this.account.planName, balance: this.account.balance, problem: error instanceof PipelineV3Error || error instanceof AuthError ? error.message : "Could not reach Bunsho. Check your connection." };
       }
     }
     if (seq !== this.accountSeq) return; // signed out (or refreshed again) while this was in flight
@@ -305,6 +310,19 @@ export class ContinuityController {
   private priceFor(chars: number, health: PipelineV3Health | null): number | null {
     if (!health) return null;
     return pipelineV3ReviewCredits({ op: PIPELINE_V3_PRICE_OP, creditsPerThousandChars: health.pricing.creditsPerThousandChars, minimumUnits: health.pricing.minimumUnits }, chars);
+  }
+
+  /** The writer came back to Obsidian, perhaps from buying credits in the browser. At most once a minute, and never mid-check. */
+  async returned(now = Date.now()): Promise<void> {
+    if (!this.account.signedIn || this.busy || now - this.returnedAt < RETURN_REFRESH_MS) return;
+    this.returnedAt = now;
+    await this.refreshAccount();
+  }
+
+  /** A draft in the writer's own mail app; the address is in the notice too, in case there is no mail app to open. */
+  contactSupport(): void {
+    new Notice(`Opening an email to ${SUPPORT_EMAIL} in your mail app.`);
+    window.open(supportMailto(this.host.version), "_external");
   }
 
   async signIn(): Promise<void> {
@@ -825,10 +843,14 @@ export class ContinuityController {
     const { world } = this;
     if (!review || !world) return null;
     try {
-      if (this.projected?.world === world && this.projected.review === review) return this.projected.entities;
+      // A chapter moved since the check: a read keeps the order it was read at, and a change must not read backwards.
+      const pages = this.scan.status === "ready" ? this.scan.pages : review.pages;
+      const orderKey = pages.map((page) => page.pageId).join("\u0000");
+      if (this.projected?.world === world && this.projected.review === review && this.projected.orderKey === orderKey) return this.projected.entities;
       const reads = worldReads(world.reads, review.ledger);
       if (reads.length === 0) return null;
-      this.projected = { world, review, entities: projectWorld(world.cast, reads) };
+      const placement = { order: new Map(pages.map((page) => [page.pageId, page.order])), chapter: new Map(review.pages.map((page) => [page.pageId, page.sourceId])) };
+      this.projected = { world, review, orderKey, entities: projectWorld(world.cast, reads, placement) };
       return this.projected.entities;
     } catch (error) {
       console.warn("[Bunsho] could not build the World", error);

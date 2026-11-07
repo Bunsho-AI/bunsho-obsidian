@@ -26,6 +26,9 @@ const RULES = [
   { pattern: /boat (?:was|is) (\w+)[^.\n]*\./giu, type: "object_state_violation", severity: "warning", subject: "the boat", attribute: "colour", dimension: "other", kind: "object_state", question: "What colour is the boat?",
     message: (a, b) => `The boat changes from ${a} to ${b}.` },
 ];
+/** What a chapter's reader files without a finding following: where someone goes, and the groups it names. */
+const MOVES = /Mira (?:went|walked|came) to ([^.\n]+)\./gu;
+const GROUPS = /\b((?:[Tt]he )?[\p{Lu}][\p{L}]* Guild)\b/gu;
 const START_KEYS = new Set(["reviewId", "workspaceId", "snapshotId", "scope", "policyId", "readPolicyId", "pages", "cachedReads", "pins", "focusNames", "maxCredits"]);
 
 const sha = (text) => createHash("sha256").update(text).digest("hex");
@@ -83,12 +86,19 @@ export function readsOf(start, pages) {
       subject: rule.subject, attribute: rule.attribute, value: s.color, dimension: rule.dimension, counterpart: null, status: "fact", kind: rule.kind,
       statement: s.quote, question: rule.question, framing: "narration", speaker: null, textMarksUntrue: false,
     })));
-    const cast = facts.length ? [{ pageId: meta.pageId, order: meta.order, name: "Mira", kind: "person", names: [{ name: "Mira", proper: true }], role: "", introducedAliases: [] }] : [];
+    const moves = [...text.matchAll(MOVES)].map((match, i) => ({
+      id: `${meta.pageId}#location${i}`, pageId: meta.pageId, order: meta.order, span: { start: match.index, end: match.index + match[0].length }, quote: match[0], paragraph: 0,
+      subject: "Mira", attribute: "location", value: match[1], dimension: "location", counterpart: null, status: "fact", kind: "location_travel",
+      statement: match[0], question: "Where is Mira?", framing: "narration", speaker: null, textMarksUntrue: false,
+    }));
+    const groups = [...new Set([...text.matchAll(GROUPS)].map((match) => match[1]))].map((name) => ({ pageId: meta.pageId, order: meta.order, name, kind: "group", names: [{ name, proper: true }], role: "", introducedAliases: [] }));
+    facts.push(...moves);
+    const cast = [...(facts.length ? [{ pageId: meta.pageId, order: meta.order, name: "Mira", kind: "person", names: [{ name: "Mira", proper: true }], role: "", introducedAliases: [] }] : []), ...groups];
     return { pageId: meta.pageId, order: meta.order, rev: meta.rev, facts, cast, narration: { person: "third", povCharacter: "", tense: "past" }, povBreaks: [], droppedFacts: 0 };
   });
 }
 
-export function startMockEngine({ port = 0, balance = 500, tamper = false, failWith = null, holdOpen = false, paid = false, registered = null, starter = 0, readingParts = true, enforce = false, tickMs = 250, ...more } = {}) {
+export function startMockEngine({ port = 0, balance = 500, tamper = false, failWith = null, holdOpen = false, paid = false, tier = "storyteller", registered = null, starter = 0, readingParts = true, enforce = false, tickMs = 250, ...more } = {}) {
   const requests = [];
   const starts = [];
   const sentPages = [];
@@ -110,6 +120,12 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
     cancelFrame: null,
     /** Answers under another read policy. */
     readPolicy: null,
+    /** On a paid plan, and which. */
+    paid, tier,
+    /** Charges what it says, refusing what the balance cannot cover. */
+    enforce,
+    /** Answers GET /v1/billing/subscription with a failure. */
+    subscriptionDown: false,
     failWith, tamper, tickMs, ...more,
   };
   let registration = registered; // { workspaceId, name } | null: the account's one free project
@@ -130,7 +146,10 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
       return json({ balance, plan: 0, extra: balance, total: balance });
     }
     if (req.url === "/v1/credits") return json({ balance, plan: 0, extra: balance, total: balance });
-    if (req.url === "/v1/billing/subscription") return json({ active: paid, tier: paid ? "storyteller" : null, status: paid ? "active" : null, renewsAt: null, cancelAtPeriodEnd: false, pendingTier: null, pendingAppliesAt: null });
+    if (req.url === "/v1/billing/subscription") {
+      if (options.subscriptionDown) { res.writeHead(503); return res.end(); }
+      return json({ active: options.paid, tier: options.paid ? options.tier : null, status: options.paid ? "active" : null, renewsAt: null, cancelAtPeriodEnd: false, pendingTier: null, pendingAppliesAt: null });
+    }
     const wire = () => registration && { workspaceId: registration.workspaceId, name: registration.name ?? null, registeredAt: "2026-10-31T00:00:00.000Z", revision: 1 };
     if (req.url === "/v1/projects/registration" && req.method === "GET") return json({ registration: wire() });
     if (req.url === "/v1/projects/registration" && req.method === "POST") {
@@ -184,7 +203,7 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
         socket.send(frame("error", { code: "invalid_request", message: "That request was not valid. You were not charged.", charged: false }));
         return;
       }
-      if (!paid && registration && registration.workspaceId !== start.workspaceId) { // the engine's one-project gate
+      if (!options.paid && registration && registration.workspaceId !== start.workspaceId) { // the engine's one-project gate
         socket.send(frame("error", { code: "project_limit", message: `Your free plan covers one project, “${registration.name ?? "your other project"}”. Upgrade to check another manuscript. You were not charged.`, charged: false }));
         return socket.close(1011);
       }
@@ -193,7 +212,7 @@ export function startMockEngine({ port = 0, balance = 500, tamper = false, failW
       const units = Math.max(3, Math.ceil(chars / 1000));
       const credits = units * 12;
       if (start.maxCredits !== undefined && credits > start.maxCredits) return refuse("price_changed", "This review now costs more than the price you confirmed. Check the new price and try again. You were not charged.");
-      if (enforce) {
+      if (options.enforce) {
         if (balance < credits) return refuse("insufficient_credits", "Not enough credits for this review. You were not charged.");
         balance -= credits;
       }

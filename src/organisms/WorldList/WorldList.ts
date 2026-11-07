@@ -1,16 +1,21 @@
 import { Fact } from "@/atoms/Fact";
 import { TextAction } from "@/atoms/TextAction";
-import type { WorldEntity, WorldFilter, WorldRow } from "@/helpers/world";
-import { filterWorld } from "@/helpers/world";
+import type { WorldChange, WorldEntity, WorldEntityFilter, WorldFilter, WorldRow } from "@/helpers/world";
+import { filterChanges, filterWorld } from "@/helpers/world";
 import { GroupHeader } from "@/molecules/GroupHeader";
 import { PanelTabs } from "@/molecules/PanelTabs";
+import { TimelineRow } from "@/molecules/TimelineRow";
 
 /**
  * The story as the last check read it, grouped as the desktop's World tab: main, supporting, and those mentioned once as
- * pills. Read-only. A fact's quote opens the passage it came from.
+ * pills, and what changed between chapters. Read-only. A fact's quote opens the passage it came from.
  */
 export interface WorldListProps {
   entities: readonly WorldEntity[];
+  /** What changed between chapters, in story order. */
+  changes: readonly WorldChange[];
+  /** Where a page is, in the writer's terms. */
+  coordinate: (pageId: string) => string;
   filter: WorldFilter;
   search: string;
   expanded: ReadonlySet<string>;
@@ -33,6 +38,8 @@ const FILTERS: { id: WorldFilter; label: string; none: string }[] = [
   { id: "people", label: "People", none: "No people yet" },
   { id: "places", label: "Places", none: "No places yet" },
   { id: "things", label: "Things", none: "No things yet" },
+  { id: "groups", label: "Groups", none: "No groups yet" },
+  { id: "events", label: "Events", none: "No changes tracked yet. A check notes what moves on between chapters, such as where someone is." },
 ];
 const VISIBLE_PILLS = 12;
 
@@ -64,6 +71,12 @@ function renderCard(parent: HTMLElement, entity: WorldEntity, props: WorldListPr
   if (earlier.length > 0) TextAction(card.createDiv({ cls: "bunsho-world-more" }), { label: showHistory ? "Hide earlier" : `Show ${earlier.length} earlier`, quiet: true, onClick: () => props.onToggleHistory(entity.id) }).setAttr("data-focus-key", `more:${entity.id}`);
 }
 
+function renderChange(parent: HTMLElement, change: WorldChange, props: WorldListProps): void {
+  const place = (row: WorldRow, end: string) => ({ coordinate: props.coordinate(row.pageId), focusKey: `event:${end}:${encodeURIComponent(change.key)}`, onGo: () => props.onGo(row) });
+  TimelineRow(parent, { name: change.entityName, label: change.label, oldValue: change.from.value, newValue: change.to.value,
+    from: place(change.from, "from"), to: place(change.to, "to"), note: props.factNote(change.from) ?? props.factNote(change.to) });
+}
+
 function renderPills(parent: HTMLElement, entities: WorldEntity[], props: WorldListProps): void {
   const open = entities.filter((e) => props.expanded.has(e.id));
   const closed = entities.filter((e) => !props.expanded.has(e.id));
@@ -79,7 +92,7 @@ function renderPills(parent: HTMLElement, entities: WorldEntity[], props: WorldL
 }
 
 export function WorldList(parent: HTMLElement, props: WorldListProps): void {
-  const count = (filter: WorldFilter) => filterWorld(props.entities, filter, "").length;
+  const count = (filter: WorldFilter) => (filter === "events" ? props.changes.length : filterWorld(props.entities, filter, "").length);
   PanelTabs(parent, { cls: "is-filter", active: props.filter, onSelect: props.onFilter, tabs: FILTERS.map((f) => ({ id: f.id, label: `${f.label} ${count(f.id)}` })) });
   if (props.gaps.length > 0) {
     const named = props.gaps.slice(0, 3).join(", ");
@@ -107,12 +120,20 @@ export function WorldList(parent: HTMLElement, props: WorldListProps): void {
 }
 
 function renderResults(parent: HTMLElement, props: WorldListProps): void {
-  const shown = filterWorld(props.entities, props.filter, props.search);
-  if (shown.length === 0) {
-    const copy = FILTERS.find((f) => f.id === props.filter);
-    Fact(parent, props.search.trim() ? "Nothing matches" : copy?.none ?? "", "bunsho-note");
+  const none = () => Fact(parent, props.search.trim() ? "Nothing matches" : FILTERS.find((f) => f.id === props.filter)?.none ?? "", "bunsho-note");
+  if (props.filter === "events") {
+    const changes = filterChanges(props.changes, props.search);
+    if (changes.length === 0) { none(); return; }
+    const list = parent.createDiv({ cls: "bunsho-list" });
+    for (const change of changes) renderChange(list, change, props);
     return;
   }
+  renderEntities(parent, props, props.filter, none);
+}
+
+function renderEntities(parent: HTMLElement, props: WorldListProps, filter: WorldEntityFilter, none: () => void): void {
+  const shown = filterWorld(props.entities, filter, props.search);
+  if (shown.length === 0) { none(); return; }
   const section = (label: string, items: WorldEntity[], render: (box: HTMLElement) => void) => {
     if (items.length === 0) return;
     GroupHeader(parent, label, items.length, false);
